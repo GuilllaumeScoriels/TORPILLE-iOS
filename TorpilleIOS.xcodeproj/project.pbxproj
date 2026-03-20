@@ -1,0 +1,521 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0BEBA5E91B29B7C17F92AF60 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2BB789A998F6FD183F2B6A /* AppRootView.swift */; };
+		1119E14976977C426AE9BB37 /* HomeAndProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */; };
+		191377AD30C0FBAD816714D0 /* CommunityManagementScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */; };
+		2EF964A1ECE7F6E83640CFC2 /* AuthAndProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */; };
+		3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = E2E09631B134A550ACDC8D1A /* FirebaseFunctions */; };
+		4292617431C7DEA5760A57B1 /* ViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95EACA6D577C51EE7ABC6053 /* ViewModels.swift */; };
+		438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CDE4B57F9F155C293EE67E /* Extensions.swift */; };
+		6055744D173296386DDA3F65 /* TorpilleError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6634C3E76FAFDB49546301F0 /* TorpilleError.swift */; };
+		66D01724431526E9BFD73D5F /* TorpilleIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */; };
+		793E8B3817EA02783D5AF4C8 /* VideoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */; };
+		887E062706FDA4DE56465BDA /* VideoMessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */; };
+		89390829B42DCA30992E0C92 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */; };
+		8BC2597AE67620D04F9412FA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9310DBDF1730EFF6694DFF94 /* Models.swift */; };
+		92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */; };
+		A6944E9279511DF229D79098 /* GoogleService-Info.plist.template in Resources */ = {isa = PBXBuildFile; fileRef = 004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */; };
+		B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = DA78468648A664FA37256F9E /* FirebaseFirestore */; };
+		BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 531C40D33B3B99A388E7B82C /* FirebaseStorage */; };
+		C427DB57A47F820B4B9A11D9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */; };
+		D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E329F91D0D4B014C3849EF5 /* Repositories.swift */; };
+		E5EF1EF19F3E06F668B4FA48 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E4083DDC571C6B8CCA46FABE /* FirebaseCore */; };
+		EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */; };
+		F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */; };
+		F1653428046986CDF8C8705D /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6886502F638EEDCBDFCF2712 /* Services.swift */; };
+		F3B8EA371A2F08CD55688377 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */ = {isa = PBXFileReference; path = "GoogleService-Info.plist.template"; sourceTree = "<group>"; };
+		0E329F91D0D4B014C3849EF5 /* Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repositories.swift; sourceTree = "<group>"; };
+		2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMessageRow.swift; sourceTree = "<group>"; };
+		4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TorpilleIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPicker.swift; sourceTree = "<group>"; };
+		6634C3E76FAFDB49546301F0 /* TorpilleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleError.swift; sourceTree = "<group>"; };
+		6886502F638EEDCBDFCF2712 /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
+		74F2CE85C47077B0755CDEC0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityManagementScreens.swift; sourceTree = "<group>"; };
+		8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerSheet.swift; sourceTree = "<group>"; };
+		8F2BB789A998F6FD183F2B6A /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		9310DBDF1730EFF6694DFF94 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		95EACA6D577C51EE7ABC6053 /* ViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels.swift; sourceTree = "<group>"; };
+		97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAndProfileScreens.swift; sourceTree = "<group>"; };
+		A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthAndProfileScreens.swift; sourceTree = "<group>"; };
+		B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityScreen.swift; sourceTree = "<group>"; };
+		BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleursMapScreen.swift; sourceTree = "<group>"; };
+		C3CDE4B57F9F155C293EE67E /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
+		F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleIOSApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3D75C56801B0112C81288005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				89390829B42DCA30992E0C92 /* FirebaseAuth in Frameworks */,
+				B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */,
+				3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */,
+				BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */,
+				F3B8EA371A2F08CD55688377 /* FirebaseMessaging in Frameworks */,
+				E5EF1EF19F3E06F668B4FA48 /* FirebaseCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		01E2048A7F256BD29F261EA8 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				95EACA6D577C51EE7ABC6053 /* ViewModels.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		2421BAF66EA5CFFA2AB5117A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		3C2B84D81B8CB0BC38ADBAA0 /* Screens */ = {
+			isa = PBXGroup;
+			children = (
+				8F2BB789A998F6FD183F2B6A /* AppRootView.swift */,
+				A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */,
+				86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */,
+				B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */,
+				97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */,
+				BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */,
+			);
+			path = Screens;
+			sourceTree = "<group>";
+		};
+		7A6D8CF653DFFE0A36CC3C64 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				9310DBDF1730EFF6694DFF94 /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		7F952ECA6FF5855B6FBA38FC /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8B508089A8CF92DB38AF26A5 /* Components */,
+				3C2B84D81B8CB0BC38ADBAA0 /* Screens */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		859201E0F28D0D79206E82C8 /* TorpilleIOS */ = {
+			isa = PBXGroup;
+			children = (
+				86ECAA8F15E904A08FFD3941 /* Core */,
+				7A6D8CF653DFFE0A36CC3C64 /* Models */,
+				D068797546ACE0EB1DA40B49 /* Repositories */,
+				F3C88B178F539236CEE1AA86 /* Resources */,
+				01E2048A7F256BD29F261EA8 /* ViewModels */,
+				7F952ECA6FF5855B6FBA38FC /* Views */,
+			);
+			path = TorpilleIOS;
+			sourceTree = "<group>";
+		};
+		86ECAA8F15E904A08FFD3941 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */,
+				C3CDE4B57F9F155C293EE67E /* Extensions.swift */,
+				6634C3E76FAFDB49546301F0 /* TorpilleError.swift */,
+				F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		8B508089A8CF92DB38AF26A5 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */,
+				5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */,
+				8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		A566BC18BBD6DDBDFE6F5CE9 = {
+			isa = PBXGroup;
+			children = (
+				859201E0F28D0D79206E82C8 /* TorpilleIOS */,
+				2421BAF66EA5CFFA2AB5117A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D068797546ACE0EB1DA40B49 /* Repositories */ = {
+			isa = PBXGroup;
+			children = (
+				0E329F91D0D4B014C3849EF5 /* Repositories.swift */,
+				6886502F638EEDCBDFCF2712 /* Services.swift */,
+			);
+			path = Repositories;
+			sourceTree = "<group>";
+		};
+		F3C88B178F539236CEE1AA86 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */,
+				74F2CE85C47077B0755CDEC0 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BE9D8A262B340EB02619DF9D /* TorpilleIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BBCC76F73ECDB4CC84599334 /* Build configuration list for PBXNativeTarget "TorpilleIOS" */;
+			buildPhases = (
+				0156CE0D9F2D0D8A49A9E67D /* Sources */,
+				ECB5077BBD4D3228B4C6AE23 /* Resources */,
+				3D75C56801B0112C81288005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TorpilleIOS;
+			packageProductDependencies = (
+				AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */,
+				DA78468648A664FA37256F9E /* FirebaseFirestore */,
+				E2E09631B134A550ACDC8D1A /* FirebaseFunctions */,
+				531C40D33B3B99A388E7B82C /* FirebaseStorage */,
+				39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */,
+				E4083DDC571C6B8CCA46FABE /* FirebaseCore */,
+			);
+			productName = TorpilleIOS;
+			productReference = 4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E2788F3D1DCF7F3E60B9EDAE /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = E71B9C28DE744848F9ED60E4 /* Build configuration list for PBXProject "TorpilleIOS" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A566BC18BBD6DDBDFE6F5CE9;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 2421BAF66EA5CFFA2AB5117A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BE9D8A262B340EB02619DF9D /* TorpilleIOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ECB5077BBD4D3228B4C6AE23 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A6944E9279511DF229D79098 /* GoogleService-Info.plist.template in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0156CE0D9F2D0D8A49A9E67D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C427DB57A47F820B4B9A11D9 /* AppEnvironment.swift in Sources */,
+				0BEBA5E91B29B7C17F92AF60 /* AppRootView.swift in Sources */,
+				2EF964A1ECE7F6E83640CFC2 /* AuthAndProfileScreens.swift in Sources */,
+				191377AD30C0FBAD816714D0 /* CommunityManagementScreens.swift in Sources */,
+				92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */,
+				438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */,
+				1119E14976977C426AE9BB37 /* HomeAndProfileScreens.swift in Sources */,
+				8BC2597AE67620D04F9412FA /* Models.swift in Sources */,
+				D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */,
+				F1653428046986CDF8C8705D /* Services.swift in Sources */,
+				6055744D173296386DDA3F65 /* TorpilleError.swift in Sources */,
+				66D01724431526E9BFD73D5F /* TorpilleIOSApp.swift in Sources */,
+				EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */,
+				887E062706FDA4DE56465BDA /* VideoMessageRow.swift in Sources */,
+				793E8B3817EA02783D5AF4C8 /* VideoPicker.swift in Sources */,
+				F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */,
+				4292617431C7DEA5760A57B1 /* ViewModels.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1AA14D559172CFC12E892CE5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.torpille.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		4F6166209269C273C2FF5927 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_LSApplicationQueriesSchemes = (
+					https,
+					torpille,
+				);
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = TorpilleIOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9A6D272E66BD34E9DC89421A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.torpille.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		B777C75BFE82E0EA90A140E4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_LSApplicationQueriesSchemes = (
+					https,
+					torpille,
+				);
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = TorpilleIOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BBCC76F73ECDB4CC84599334 /* Build configuration list for PBXNativeTarget "TorpilleIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4F6166209269C273C2FF5927 /* Debug */,
+				B777C75BFE82E0EA90A140E4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E71B9C28DE744848F9ED60E4 /* Build configuration list for PBXProject "TorpilleIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9A6D272E66BD34E9DC89421A /* Debug */,
+				1AA14D559172CFC12E892CE5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		531C40D33B3B99A388E7B82C /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		DA78468648A664FA37256F9E /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		E2E09631B134A550ACDC8D1A /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		E4083DDC571C6B8CCA46FABE /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = E2788F3D1DCF7F3E60B9EDAE /* Project object */;
+}

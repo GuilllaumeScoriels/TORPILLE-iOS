@@ -1,0 +1,50 @@
+name: TorpilleIOS
+options:
+  bundleIdPrefix: com.torpille
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.torpille.ios
+    IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+    SWIFT_VERSION: '5.10'
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: 11.10.0
+targets:
+  TorpilleIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: TorpilleIOS
+    resources:
+      - path: TorpilleIOS/Resources
+        optional: true
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: TorpilleIOS/Resources/Info.plist
+        PRODUCT_NAME: TorpilleIOS
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_LSApplicationQueriesSchemes:
+          - https
+          - torpille
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.
+        INFOPLIST_KEY_CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.torpille.deeplink
+            CFBundleURLSchemes:
+              - torpille
+    dependencies:
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseFunctions
+      - package: Firebase
+        product: FirebaseStorage
+      - package: Firebase
+        product: FirebaseMessaging
+      - package: Firebase
+        product: FirebaseCore
