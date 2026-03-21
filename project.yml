@@ -45,6 +45,4 @@ targets:
       - package: Firebase
         product: FirebaseStorage
       - package: Firebase
-        product: FirebaseMessaging
-      - package: Firebase
         product: FirebaseCore

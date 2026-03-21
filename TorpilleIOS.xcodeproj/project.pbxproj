@@ -21,22 +21,21 @@
 		89390829B42DCA30992E0C92 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */; };
 		8BC2597AE67620D04F9412FA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9310DBDF1730EFF6694DFF94 /* Models.swift */; };
 		92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */; };
-		A6944E9279511DF229D79098 /* GoogleService-Info.plist.template in Resources */ = {isa = PBXBuildFile; fileRef = 004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */; };
+		9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */; };
 		B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = DA78468648A664FA37256F9E /* FirebaseFirestore */; };
 		BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 531C40D33B3B99A388E7B82C /* FirebaseStorage */; };
 		C427DB57A47F820B4B9A11D9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */; };
 		D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E329F91D0D4B014C3849EF5 /* Repositories.swift */; };
-		E5EF1EF19F3E06F668B4FA48 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E4083DDC571C6B8CCA46FABE /* FirebaseCore */; };
 		EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */; };
 		F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */; };
 		F1653428046986CDF8C8705D /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6886502F638EEDCBDFCF2712 /* Services.swift */; };
-		F3B8EA371A2F08CD55688377 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */; };
+		F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E4083DDC571C6B8CCA46FABE /* FirebaseCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */ = {isa = PBXFileReference; path = "GoogleService-Info.plist.template"; sourceTree = "<group>"; };
 		0E329F91D0D4B014C3849EF5 /* Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repositories.swift; sourceTree = "<group>"; };
 		2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMessageRow.swift; sourceTree = "<group>"; };
+		2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TorpilleIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPicker.swift; sourceTree = "<group>"; };
@@ -65,8 +64,7 @@
 				B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */,
 				3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */,
 				BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */,
-				F3B8EA371A2F08CD55688377 /* FirebaseMessaging in Frameworks */,
-				E5EF1EF19F3E06F668B4FA48 /* FirebaseCore in Frameworks */,
+				F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -173,7 +171,7 @@
 		F3C88B178F539236CEE1AA86 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				004F84F15BC25FB70640AC78 /* GoogleService-Info.plist.template */,
+				2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */,
 				74F2CE85C47077B0755CDEC0 /* Info.plist */,
 			);
 			path = Resources;
@@ -200,7 +198,6 @@
 				DA78468648A664FA37256F9E /* FirebaseFirestore */,
 				E2E09631B134A550ACDC8D1A /* FirebaseFunctions */,
 				531C40D33B3B99A388E7B82C /* FirebaseStorage */,
-				39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */,
 				E4083DDC571C6B8CCA46FABE /* FirebaseCore */,
 			);
 			productName = TorpilleIOS;
@@ -245,7 +242,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A6944E9279511DF229D79098 /* GoogleService-Info.plist.template in Resources */,
+				9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -343,7 +340,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"]]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = (
 					https,
 					torpille,
@@ -432,7 +429,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"]]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = (
 					https,
 					torpille,
@@ -485,11 +482,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseMessaging;
-		};
 		531C40D33B3B99A388E7B82C /* FirebaseStorage */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

@@ -19,21 +19,26 @@ import FirebaseCore
 
 @main
 struct TorpilleIOSApp: App {
-    private let env: AppEnvironment
+    private let env: AppEnvironment?
     private let firebaseConfigured: Bool
 
     init() {
-        let hasFirebasePlist = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil
-        if hasFirebasePlist, FirebaseApp.app() == nil {
+        if FirebaseApp.app() == nil,
+           Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
             FirebaseApp.configure()
         }
+
         firebaseConfigured = FirebaseApp.app() != nil
-        env = AppEnvironment()
+        env = firebaseConfigured ? AppEnvironment() : nil
+
+        if !firebaseConfigured {
+            print("🔥 Firebase non configuré au démarrage. Vérifie que GoogleService-Info.plist est bien embarqué dans le target iOS.")
+        }
     }
 
     var body: some Scene {
         WindowGroup {
-            if firebaseConfigured {
+            if let env {
                 AppRootView(viewModel: AppRootViewModel(env: env))
             } else {
                 FirebaseSetupRequiredView()

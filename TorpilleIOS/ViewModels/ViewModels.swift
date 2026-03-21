@@ -88,7 +88,26 @@ final class AuthViewModel: ObservableObject {
                 try await block()
                 onSuccess()
             } catch {
-                self.error = error.localizedDescription
+                let nsError = error as NSError
+                print("🔥 FIREBASE AUTH ERROR RAW:", error)
+                print("🔥 FIREBASE AUTH ERROR DOMAIN:", nsError.domain)
+                print("🔥 FIREBASE AUTH ERROR CODE:", nsError.code)
+                print("🔥 FIREBASE AUTH ERROR USERINFO:", nsError.userInfo)
+                print("🔥 FIREBASE AUTH ERROR DESCRIPTION:", nsError.localizedDescription)
+
+                let details = String(describing: nsError.userInfo)
+                if details.contains("API_KEY_SERVICE_BLOCKED") || details.contains("identitytoolkit") {
+                    self.error = """
+                    La connexion Firebase est bloquée côté console Google/Firebase.
+                    La clé API iOS n'a pas accès à Identity Toolkit (Email/Mot de passe).
+                    Ouvre Google Cloud Console > APIs & Services > Credentials > clé iOS du projet, puis autorise l'API identitytoolkit.googleapis.com.
+                    """
+                } else {
+                    self.error = """
+                    \(nsError.domain) (\(nsError.code))
+                    \(nsError.localizedDescription)
+                    """
+                }
             }
         }
     }
