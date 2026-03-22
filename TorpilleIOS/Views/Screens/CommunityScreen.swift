@@ -1,22 +1,9 @@
-/**
- Fichier : CommunityScreen.swift
- Rôle :
- - Écran principal d'une communauté : messages, torpilles vidéo et réponses.
-
- Ce que fait ce fichier :
- - Affiche les messages texte et vidéo.
- - Fournit des boutons vidéo fonctionnels qui ouvrent un lecteur intégré.
- - Permet d'envoyer une torpille vidéo ou de répondre à une torpille en attente.
- - Utilise `VideoPicker` pour sélectionner un fichier vidéo avant envoi.
-
- Pourquoi c'est utile :
- - C'est l'écran le plus proche du flux Android amélioré fourni par l'utilisateur.
- */
-
 import SwiftUI
+import AVFoundation
 
 private enum CommunityComposerMode: String, CaseIterable, Identifiable {
     case text = "Texte"
+    case audio = "Vocal"
     case video = "Torpille vidéo"
     case response = "Réponse vidéo"
 
@@ -29,6 +16,8 @@ struct CommunityScreen: View {
     let onBack: () -> Void
     let onOpenInfo: () -> Void
 
+    @StateObject private var audioRecorder = AudioRecorderService()
+
     @State private var text = ""
     @State private var selectedFileURL: URL?
     @State private var selectedMemberID = ""
@@ -40,6 +29,9 @@ struct CommunityScreen: View {
     @State private var playbackTagX: Double?
     @State private var playbackTagY: Double?
     @State private var isLoadingVideo = false
+
+    @State private var audioPlayer: AVPlayer?
+    @State private var playingAudioMessageId: String?
 
     init(env: AppEnvironment, communityId: String, onBack: @escaping () -> Void, onOpenInfo: @escaping () -> Void) {
         self.communityId = communityId
@@ -89,9 +81,11 @@ struct CommunityScreen: View {
                 ForEach(vm.messages, id: \.stableId) { message in
                     if message.type == "video" {
                         VideoMessageRow(message: message) {
-                            Task {
-                                await play(message: message)
-                            }
+                            Task { await playVideo(message: message) }
+                        }
+                    } else if message.type == "audio" {
+                        AudioMessageRow(message: message, isPlaying: playingAudioMessageId == message.stableId) {
+                            Task { await playAudio(message: message) }
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
@@ -111,6 +105,11 @@ struct CommunityScreen: View {
         }
         .navigationBarBackButtonHidden(true)
         .onAppear { vm.start(communityId: communityId) }
+        .onDisappear {
+            audioPlayer?.pause()
+            audioPlayer = nil
+            audioRecorder.clear()
+        }
         .sheet(item: Binding(get: {
             playbackURL.map { PlaybackContainer(url: $0, title: playbackTitle, tagX: playbackTagX, tagY: playbackTagY) }
         }, set: { newValue in
@@ -125,7 +124,7 @@ struct CommunityScreen: View {
             if isLoadingVideo || vm.isSending {
                 ZStack {
                     Color.black.opacity(0.15).ignoresSafeArea()
-                    ProgressView(isLoadingVideo ? "Chargement de la vidéo…" : "Envoi…")
+                    ProgressView(isLoadingVideo ? "Chargement du média…" : "Envoi…")
                         .padding()
                         .background(.thinMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -148,6 +147,49 @@ struct CommunityScreen: View {
                     text = ""
                 }
             }
+
+        case .audio:
+            VStack(alignment: .leading, spacing: 10) {
+                Text(audioRecorder.isRecording ? "Enregistrement en cours…" : "Envoie un message vocal à la communauté")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if let recorded = audioRecorder.recordedFileURL {
+                    Text("Fichier prêt : \(recorded.lastPathComponent)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Button(audioRecorder.isRecording ? "Arrêter" : "Enregistrer") {
+                        Task {
+                            do {
+                                if audioRecorder.isRecording {
+                                    _ = try audioRecorder.stopRecording()
+                                } else {
+                                    try await audioRecorder.startRecording()
+                                }
+                            } catch {
+                                vm.error = error.localizedDescription
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Envoyer le vocal") {
+                        guard let fileURL = audioRecorder.recordedFileURL else { return }
+                        vm.sendAudioMessage(
+                            communityId: communityId,
+                            fileURL: fileURL,
+                            durationSeconds: audioRecorder.recordedDurationSeconds
+                        )
+                        audioRecorder.clear()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(audioRecorder.isRecording || audioRecorder.recordedFileURL == nil)
+                }
+            }
+
         case .video:
             VStack(alignment: .leading, spacing: 8) {
                 VideoPicker(selectedFileURL: $selectedFileURL)
@@ -168,6 +210,7 @@ struct CommunityScreen: View {
                 }
                 .disabled(selectedFileURL == nil || selectedMemberID.isEmpty)
             }
+
         case .response:
             VStack(alignment: .leading, spacing: 8) {
                 VideoPicker(selectedFileURL: $selectedFileURL)
@@ -197,7 +240,7 @@ struct CommunityScreen: View {
     }
 
     @MainActor
-    private func play(message: Message) async {
+    private func playVideo(message: Message) async {
         isLoadingVideo = true
         defer { isLoadingVideo = false }
         do {
@@ -206,6 +249,29 @@ struct CommunityScreen: View {
             playbackTitle = message.taggedPseudo
             playbackTagX = message.tagX
             playbackTagY = message.tagY
+        } catch {
+            vm.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func playAudio(message: Message) async {
+        if playingAudioMessageId == message.stableId {
+            audioPlayer?.pause()
+            audioPlayer = nil
+            playingAudioMessageId = nil
+            return
+        }
+
+        isLoadingVideo = true
+        defer { isLoadingVideo = false }
+        do {
+            let url = try await vm.resolvePlaybackURL(for: message)
+            let player = AVPlayer(url: url)
+            audioPlayer?.pause()
+            audioPlayer = player
+            playingAudioMessageId = message.stableId
+            player.play()
         } catch {
             vm.error = error.localizedDescription
         }

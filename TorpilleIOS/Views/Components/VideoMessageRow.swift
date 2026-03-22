@@ -1,16 +1,3 @@
-/**
- Fichier : VideoMessageRow.swift
- Rôle :
- - Affiche une ligne de message vidéo avec un bouton de lecture clair.
-
- Ce que fait ce fichier :
- - Reproduit l'intention du composant Android `VideoMessageItem`.
- - Affiche le pseudo tagué et déclenche la lecture au toucher.
-
- Pourquoi c'est utile :
- - Les boutons vidéo sont immédiatement actionnables dans la version iOS.
- */
-
 import SwiftUI
 
 struct VideoMessageRow: View {
@@ -43,5 +30,48 @@ struct VideoMessageRow: View {
             return "Vidéo → @\(taggedPseudo)"
         }
         return "Vidéo"
+    }
+}
+
+struct AudioMessageRow: View {
+    let message: Message
+    let isPlaying: Bool
+    let onPlay: () -> Void
+
+    var body: some View {
+        Button(action: onPlay) {
+            HStack(spacing: 12) {
+                Image(systemName: isPlaying ? "stop.circle.fill" : "waveform.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(isPlaying ? .red : .green)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Vocal de \(message.senderPseudo)")
+                        .foregroundStyle(.primary)
+                    Text(durationText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text(isPlaying ? "Arrêter" : "Lire")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var durationText: String {
+        guard let seconds = message.audioDurationSeconds else {
+            return "Durée inconnue"
+        }
+        let total = max(Int(seconds.rounded()), 0)
+        let minutes = total / 60
+        let remaining = total % 60
+        return String(format: "%d:%02d", minutes, remaining)
     }
 }

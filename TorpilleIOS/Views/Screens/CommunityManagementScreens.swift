@@ -95,6 +95,9 @@ struct CommunityInfoScreen: View {
                     Text("Invitation : https://torpille-38783.web.app/join?cid=\(community.stableId)")
                         .font(.footnote)
                         .textSelection(.enabled)
+                    Text("La page d’invitation propose maintenant deux boutons de téléchargement : Android et iPhone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

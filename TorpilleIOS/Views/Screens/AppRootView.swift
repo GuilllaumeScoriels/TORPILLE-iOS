@@ -21,9 +21,13 @@ struct AppRootView: View {
                     ProgressView("Chargement…")
                         .task { await viewModel.bootstrap() }
                 case .auth:
-                    AuthScreen(onAuthed: { viewModel.route = .splash }, env: viewModel.env)
+                    AuthScreen(onAuthed: {
+                        Task { await viewModel.resumePendingJoinIfPossible() }
+                    }, env: viewModel.env)
                 case .profile:
-                    ProfileSetupScreen(onDone: { viewModel.route = .splash }, env: viewModel.env)
+                    ProfileSetupScreen(onDone: {
+                        Task { await viewModel.resumePendingJoinIfPossible() }
+                    }, env: viewModel.env)
                 case .home:
                     MainTabView(env: viewModel.env, onCreateCommunity: {
                         viewModel.route = .createCommunity
@@ -35,13 +39,22 @@ struct AppRootView: View {
                 case .createCommunity:
                     CreateCommunityScreen(env: viewModel.env, onCreated: { viewModel.route = .community($0) }, onBack: { viewModel.route = .home })
                 case .join(let communityId):
-                    JoinCommunityScreen(env: viewModel.env, communityId: communityId, onJoined: { viewModel.route = .communityInfo(communityId) }, onCancel: { viewModel.route = .home })
+                    JoinCommunityScreen(env: viewModel.env, communityId: communityId, onJoined: {
+                        viewModel.clearPendingJoin()
+                        viewModel.route = .communityInfo(communityId)
+                    }, onCancel: {
+                        viewModel.clearPendingJoin()
+                        viewModel.route = .home
+                    })
                 case .community(let communityId):
                     CommunityScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .home }, onOpenInfo: { viewModel.route = .communityInfo(communityId) })
                 case .communityInfo(let communityId):
                     CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) })
                 }
             }
+        }
+        .onOpenURL { url in
+            viewModel.handleIncomingURL(url)
         }
     }
 }
@@ -51,6 +64,21 @@ struct MainTabView: View {
     let onCreateCommunity: () -> Void
     let onOpenCommunity: (String) -> Void
     let onSignOut: () -> Void
+
+    @StateObject private var launchLocationSyncViewModel: LaunchLocationSyncViewModel
+
+    init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onSignOut: @escaping () -> Void) {
+        self.env = env
+        self.onCreateCommunity = onCreateCommunity
+        self.onOpenCommunity = onOpenCommunity
+        self.onSignOut = onSignOut
+        _launchLocationSyncViewModel = StateObject(
+            wrappedValue: LaunchLocationSyncViewModel(
+                repo: env.communityRepository,
+                locationService: env.locationService
+            )
+        )
+    }
 
     var body: some View {
         TabView {
@@ -65,6 +93,9 @@ struct MainTabView: View {
 
             TorpilleursMapScreen(env: env)
                 .tabItem { Label("Carte", systemImage: "map.fill") }
+        }
+        .task {
+            await launchLocationSyncViewModel.syncOnAppOpenIfNeeded()
         }
     }
 }

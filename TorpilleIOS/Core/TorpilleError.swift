@@ -23,6 +23,7 @@ enum TorpilleError: LocalizedError {
     case invalidResponseTime
     case videoNotAvailable
     case locationUnavailable
+    case uploadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +39,8 @@ enum TorpilleError: LocalizedError {
             return "Impossible de lire cette vidéo pour le moment."
         case .locationUnavailable:
             return "Position indisponible. Vérifie les autorisations de localisation."
+        case .uploadFailed(let message):
+            return message
         }
     }
 }

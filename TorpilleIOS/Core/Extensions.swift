@@ -26,6 +26,12 @@ extension Timestamp {
         formatter.dateFormat = "dd/MM/yyyy HH:mm"
         return formatter.string(from: dateValue())
     }
+
+    var formattedHourMinute: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: dateValue())
+    }
 }
 
 extension Member {
@@ -38,5 +44,9 @@ extension Member {
         let torpilleText = lastTorpilledAt?.formattedDateTime ?? "jamais"
         let locationText = lastLocationUpdatedAt?.formattedDateTime ?? "jamais"
         return "Dernière torpille : \(torpilleText) • Position mise à jour : \(locationText)"
+    }
+
+    var mapLastTorpilleTimeText: String {
+        lastTorpilledAt?.formattedHourMinute ?? "--:--"
     }
 }

@@ -1,13 +1,3 @@
-/**
- Fichier : AuthAndProfileScreens.swift
- Rôle :
- - Regroupe les écrans d'authentification et de configuration du profil.
-
- Ce que fait ce fichier :
- - Permet de créer un compte, se connecter et enregistrer un pseudo.
- - Réutilise les view models dédiés pour rester proche de l'architecture Android.
- */
-
 import SwiftUI
 
 struct AuthScreen: View {
@@ -25,6 +15,7 @@ struct AuthScreen: View {
                 TextField("Email", text: $vm.email)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.emailAddress)
+                    .autocorrectionDisabled()
                 SecureField("Mot de passe", text: $vm.password)
                 Button(vm.isLoading ? "Chargement…" : "Se connecter") {
                     vm.signIn(onSuccess: onAuthed)
@@ -34,6 +25,14 @@ struct AuthScreen: View {
                     vm.signUp(onSuccess: onAuthed)
                 }
                 .disabled(vm.isLoading)
+                Button("Mot de passe oublié") {
+                    vm.resetPassword()
+                }
+                .disabled(vm.isLoading)
+            }
+
+            if let info = vm.infoMessage {
+                Section { Text(info).foregroundStyle(.green) }
             }
 
             if let error = vm.error {
@@ -56,7 +55,18 @@ struct ProfileSetupScreen: View {
     var body: some View {
         Form {
             Section("Ton profil") {
+                HStack {
+                    Spacer()
+                    EmojiAvatarView(profileIcon: vm.selectedProfileIcon, size: 96)
+                    Spacer()
+                }
+
+                ProfileIconPicker(selectedIcon: $vm.selectedProfileIcon)
+
                 TextField("Pseudo", text: $vm.pseudo)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
                 Button(vm.isSaving ? "Enregistrement…" : "Continuer") {
                     vm.save(onDone: onDone)
                 }

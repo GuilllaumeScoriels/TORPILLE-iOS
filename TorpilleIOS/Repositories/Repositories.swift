@@ -1,29 +1,14 @@
-/**
- Fichier : Repositories.swift
- Rôle :
- - Implémente l'accès aux données Firebase pour l'application iOS.
-
- Ce que fait ce fichier :
- - Gère l'authentification, le profil, les communautés, les membres, les messages,
-   l'upload vidéo et la carte.
- - Reprend les comportements importants de la version Android améliorée :
-   création de torpilles vidéo, réponse vidéo, récupération d'URL signée,
-   mise à jour de position et listes en temps réel.
-
- À noter :
- - Les listeners Firestore sont exposés avec des callbacks pour rester simples.
- - Le projet reste source-compatible avec XcodeGen et Firebase SPM.
- */
-
 import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
+import FirebaseStorage
 
 final class AuthRepository {
     private let auth = Auth.auth()
 
     var currentUID: String? { auth.currentUser?.uid }
+    var currentEmail: String { auth.currentUser?.email ?? "" }
 
     func signUp(email: String, password: String) async throws {
         _ = try await auth.createUser(withEmail: email, password: password)
@@ -31,6 +16,10 @@ final class AuthRepository {
 
     func signIn(email: String, password: String) async throws {
         _ = try await auth.signIn(withEmail: email, password: password)
+    }
+
+    func sendPasswordReset(email: String) async throws {
+        try await auth.sendPasswordReset(withEmail: email)
     }
 
     func signOut() throws {
@@ -41,9 +30,25 @@ final class AuthRepository {
 final class UserRepository {
     private let auth = Auth.auth()
     private let db = Firestore.firestore()
+    private let transferService = VideoTransferService()
 
     private var users: CollectionReference { db.collection("users") }
     private var pseudos: CollectionReference { db.collection("pseudos") }
+
+    private func decodeUserProfile(from snapshot: DocumentSnapshot, fallbackUID: String) -> UserProfile {
+        let data = snapshot.data() ?? [:]
+        return UserProfile(
+            documentId: snapshot.documentID,
+            uid: (data["uid"] as? String) ?? fallbackUID,
+            pseudo: (data["pseudo"] as? String) ?? "",
+            pseudoKey: (data["pseudoKey"] as? String) ?? "",
+            photoUrl: data["photoUrl"] as? String,
+            profileIcon: data["profileIcon"] as? String,
+            xpTotal: (data["xpTotal"] as? Int64) ?? Int64(data["xpTotal"] as? Int ?? 0),
+            fcmToken: data["fcmToken"] as? String,
+            updatedAt: data["updatedAt"] as? Timestamp
+        )
+    }
 
     func getMeOrThrow() async throws -> UserProfile {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
@@ -51,7 +56,7 @@ final class UserRepository {
         guard snapshot.exists else {
             throw TorpilleError.missingData("Profil introuvable")
         }
-        return try snapshot.data(as: UserProfile.self)
+        return decodeUserProfile(from: snapshot, fallbackUID: uid)
     }
 
     func observeMe(handler: @escaping (UserProfile?) -> Void) -> ListenerRegistration? {
@@ -64,11 +69,11 @@ final class UserRepository {
                 handler(nil)
                 return
             }
-            handler(try? snapshot.data(as: UserProfile.self))
+            handler(self.decodeUserProfile(from: snapshot, fallbackUID: uid))
         }
     }
 
-    func upsertProfile(pseudo: String, photoURL: String?) async throws {
+    func upsertProfile(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count >= 3, clean.count <= 20,
@@ -80,41 +85,87 @@ final class UserRepository {
         let userRef = users.document(uid)
         let pseudoRef = pseudos.document(pseudoKey)
 
-        try await db.runTransaction { transaction, _ in
-            let userSnapshot: DocumentSnapshot
-            let pseudoSnapshot: DocumentSnapshot
+        _ = try await db.runTransaction { transaction, errorPointer in
             do {
-                userSnapshot = try transaction.getDocument(userRef)
-                pseudoSnapshot = try transaction.getDocument(pseudoRef)
+                let userSnapshot = try transaction.getDocument(userRef)
+                let pseudoSnapshot = try transaction.getDocument(pseudoRef)
+                let now = Timestamp(date: Date())
+                let currentKey = userSnapshot.data()?["pseudoKey"] as? String ?? ""
+                let existingPhotoURL = userSnapshot.data()?["photoUrl"] as? String
+                let existingProfileIcon = userSnapshot.data()?["profileIcon"] as? String
+
+                if pseudoSnapshot.exists,
+                   let owner = pseudoSnapshot.data()?["uid"] as? String,
+                   owner != uid {
+                    let error = NSError(
+                        domain: "UserRepository",
+                        code: 409,
+                        userInfo: [NSLocalizedDescriptionKey: "Ce pseudo est déjà utilisé."]
+                    )
+                    errorPointer?.pointee = error
+                    return nil
+                }
+
+                transaction.setData([
+                    "uid": uid,
+                    "createdAt": now
+                ], forDocument: pseudoRef, merge: true)
+
+                let resolvedPhotoURL = photoURL?.isEmpty == false ? photoURL : existingPhotoURL
+                let resolvedProfileIcon = (profileIcon?.isEmpty == false ? profileIcon : existingProfileIcon) ?? "🍺"
+
+                var payload: [String: Any] = [
+                    "uid": uid,
+                    "pseudo": clean,
+                    "pseudoKey": pseudoKey,
+                    "updatedAt": now,
+                    "photoUrl": resolvedPhotoURL as Any,
+                    "profileIcon": resolvedProfileIcon
+                ]
+
+                if userSnapshot.data()?["createdAt"] == nil {
+                    payload["createdAt"] = now
+                }
+
+                transaction.setData(payload, forDocument: userRef, merge: true)
+
+                if !currentKey.isEmpty, currentKey != pseudoKey {
+                    transaction.deleteDocument(self.pseudos.document(currentKey))
+                }
+                return nil
             } catch {
+                errorPointer?.pointee = error as NSError
                 return nil
             }
+        }
+    }
 
-            let currentKey = userSnapshot.data()?["pseudoKey"] as? String ?? ""
-            if pseudoSnapshot.exists,
-               let owner = pseudoSnapshot.data()?["uid"] as? String,
-               owner != uid {
-                return nil
-            }
+    func updateProfile(pseudo: String, imageData: Data?, profileIcon: String?) async throws {
+        var uploadedURL: String?
+        if let imageData, let uid = auth.currentUser?.uid {
+            let compressed = imageData
+            let filename = "profile_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+            let uploaded = try await transferService.uploadProfileImage(uid: uid, imageData: compressed, filename: filename)
+            uploadedURL = uploaded.downloadURL
+        }
 
-            transaction.setData([
-                "uid": uid,
-                "createdAt": Timestamp(date: Date())
-            ], forDocument: pseudoRef, merge: true)
+        try await upsertProfile(pseudo: pseudo, photoURL: uploadedURL, profileIcon: profileIcon)
+        try await propagateProfileToCommunityMemberships()
+    }
 
-            var payload: [String: Any] = [
-                "uid": uid,
-                "pseudo": clean,
-                "pseudoKey": pseudoKey,
-                "updatedAt": Timestamp(date: Date())
-            ]
-            payload["photoUrl"] = photoURL?.isEmpty == false ? photoURL! : "https://api.dicebear.com/9.x/thumbs/png?seed=\(clean.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? clean)"
-            transaction.setData(payload, forDocument: userRef, merge: true)
+    private func propagateProfileToCommunityMemberships() async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let me = try await getMeOrThrow()
+        let membershipSnapshot = try await db.collectionGroup("members")
+            .whereField("uid", isEqualTo: uid)
+            .getDocuments()
 
-            if !currentKey.isEmpty, currentKey != pseudoKey {
-                transaction.deleteDocument(self.pseudos.document(currentKey))
-            }
-            return nil
+        for document in membershipSnapshot.documents {
+            try await document.reference.setData([
+                "pseudo": me.pseudo,
+                "photoUrl": me.photoUrl as Any,
+                "profileIcon": me.profileIcon as Any
+            ], merge: true)
         }
     }
 }
@@ -126,7 +177,6 @@ final class CommunityRepository {
     private let videoTransfer = VideoTransferService()
 
     private var communities: CollectionReference { db.collection("communities") }
-    private var users: CollectionReference { db.collection("users") }
 
     func inviteLink(for communityId: String) -> String {
         "https://torpille-38783.web.app/join?cid=\(communityId)"
@@ -152,14 +202,14 @@ final class CommunityRepository {
             createdAt: Timestamp(date: Date())
         )
         try doc.setData(from: community)
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, xpInCommunity: 0)
+        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, profileIcon: me.profileIcon, xpInCommunity: 0)
         try doc.collection("members").document(uid).setData(from: member)
         return doc.documentID
     }
 
     func joinCommunity(communityId: String, me: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, xpInCommunity: 0)
+        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, profileIcon: me.profileIcon, xpInCommunity: 0)
         try communities.document(communityId).collection("members").document(uid).setData(from: member, merge: true)
     }
 
@@ -208,6 +258,17 @@ final class CommunityRepository {
                     handler(result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
                 }
             }
+    }
+
+    func myCommunityIds() async throws -> [String] {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+
+        let snapshot = try await db.collectionGroup("members")
+            .whereField("uid", isEqualTo: uid)
+            .getDocuments()
+
+        let ids = snapshot.documents.compactMap { $0.reference.parent.parent?.documentID }
+        return Array(Set(ids)).sorted()
     }
 
     func observeMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
@@ -264,6 +325,28 @@ final class CommunityRepository {
         _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
     }
 
+    func sendAudioMessage(communityId: String, senderPseudo: String, localFileURL: URL, durationSeconds: Double) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).m4a"
+        let uploaded = try await videoTransfer.uploadCommunityAudio(
+            communityId: communityId,
+            localFileURL: localFileURL,
+            filename: filename,
+            durationSeconds: durationSeconds
+        )
+
+        let payload: [String: Any] = [
+            "type": "audio",
+            "senderUid": uid,
+            "senderPseudo": senderPseudo,
+            "audioBucket": uploaded.bucket,
+            "audioPath": uploaded.storagePath,
+            "audioDurationSeconds": uploaded.durationSeconds,
+            "createdAt": Timestamp(date: Date())
+        ]
+        _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+    }
+
     func getSignedPlaybackURL(videoPath: String, videoBucket: String?) async throws -> URL {
         try await videoTransfer.resolvePlaybackURL(videoPath: videoPath, videoBucket: videoBucket)
     }
@@ -280,7 +363,8 @@ final class CommunityRepository {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let community = try await getCommunityOrThrow(communityId)
 
-        let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).mp4"
+        let fileExtension = localFileURL.pathExtension.isEmpty ? "mov" : localFileURL.pathExtension.lowercased()
+        let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).\(fileExtension)"
         let uploaded = try await videoTransfer.uploadCommunityVideo(
             communityId: communityId,
             localFileURL: localFileURL,
@@ -317,6 +401,10 @@ final class CommunityRepository {
             videoUrl: nil,
             videoBucket: uploaded.bucket,
             videoPath: uploaded.storagePath,
+            audioUrl: nil,
+            audioBucket: nil,
+            audioPath: nil,
+            audioDurationSeconds: nil,
             taggedUid: taggedUid,
             taggedPseudo: taggedPseudo,
             tagX: tagX,

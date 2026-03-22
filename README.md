@@ -61,3 +61,34 @@ Je ne peux pas compiler ni exécuter Xcode dans cet environnement Linux, donc je
 - ajout d'un vrai `Info.plist` dans `TorpilleIOS/Resources/`
 - suppression de la dépendance SPM `FirebaseFirestoreSwift` devenue inutile ici
 - conservation de `FirebaseFirestore` pour les APIs de décodage Firestore
+
+
+## Invitation communauté avec Android + iPhone
+
+Le lien d’invitation de communauté reste :
+
+`https://torpille-38783.web.app/join?cid=<communityId>`
+
+J’ai ajouté un mini projet Firebase Hosting dans `Hosting/` avec une page `join.html` qui :
+- récupère `cid` dans l’URL,
+- affiche un bouton **Télécharger sur Android**,
+- affiche un bouton **Télécharger sur iPhone**,
+- garde un bouton **Ouvrir dans l’app Torpille** via `torpille://join?cid=...`.
+
+### Déploiement
+
+Depuis le dossier `Hosting/` :
+
+```bash
+firebase deploy --only hosting
+```
+
+### Point à modifier avant mise en production
+
+Dans `Hosting/public/join.html`, remplace :
+
+`https://apps.apple.com/app/id0000000000`
+
+par l’URL réelle App Store de ton application iOS.
+
+Tu peux aussi ajuster le lien Android si ton identifiant Play Store final diffère de `com.torpille.android`.

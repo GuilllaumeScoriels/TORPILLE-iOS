@@ -54,7 +54,8 @@ struct VideoPicker: View {
             guard let temporaryURL = try await item.loadTransferable(type: TemporaryVideoFile.self)?.url else {
                 throw TorpilleError.videoNotAvailable
             }
-            let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+            let ext = temporaryURL.pathExtension.isEmpty ? "mov" : temporaryURL.pathExtension
+            let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)
             }
@@ -74,7 +75,8 @@ private struct TemporaryVideoFile: Transferable {
         FileRepresentation(contentType: .movie) { file in
             SentTransferredFile(file.url)
         } importing: { received in
-            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+            let ext = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             if FileManager.default.fileExists(atPath: copy.path) {
                 try FileManager.default.removeItem(at: copy)
             }

@@ -1,14 +1,3 @@
-/**
- Fichier : HomeAndProfileScreens.swift
- Rôle :
- - Affiche l'accueil, l'onglet communautés et l'écran profil.
-
- Ce que fait ce fichier :
- - Liste les communautés de l'utilisateur.
- - Donne un accès direct à la création de communauté et à la déconnexion.
- - Affiche un bouton carte, comme dans la version Android enrichie.
- */
-
 import SwiftUI
 
 struct HomeScreen: View {
@@ -30,6 +19,9 @@ struct HomeScreen: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(vm.me?.pseudo ?? "Utilisateur")
                         .font(.headline)
+                    Text(vm.email)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     Text("XP total : \(vm.me?.xpTotal ?? 0)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -89,6 +81,9 @@ struct CommunitiesTabScreen: View {
 
 struct UserProfileScreen: View {
     @StateObject private var vm: HomeViewModel
+    @State private var pseudoDraft = ""
+    @State private var selectedProfileIcon = "🍺"
+
     let onEditProfile: () -> Void
     let onSignOut: () -> Void
 
@@ -100,16 +95,76 @@ struct UserProfileScreen: View {
 
     var body: some View {
         Form {
+            Section("Icône de profil") {
+                HStack {
+                    Spacer()
+                    ProfileAvatarView(profileIcon: selectedProfileIcon)
+                    Spacer()
+                }
+
+                ProfileIconPicker(selectedIcon: $selectedProfileIcon)
+            }
+
             Section("Profil") {
-                Text("Pseudo : \(vm.me?.pseudo ?? "")")
-                Text("XP total : \(vm.me?.xpTotal ?? 0)")
-                Button("Modifier le profil", action: onEditProfile)
+                TextField("Pseudo", text: $pseudoDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Text("Email : \(vm.email)")
+
+                HStack {
+                    Text("Mot de passe")
+                    Spacer()
+                    Text("••••••••")
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Le mot de passe actuel ne peut pas être relu depuis Firebase Auth. Tu peux toutefois le réinitialiser par email.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Enregistrer les modifications") {
+                    vm.saveProfile(pseudo: pseudoDraft, imageData: nil, profileIcon: selectedProfileIcon)
+                    onEditProfile()
+                }
+
+                Button("Réinitialiser le mot de passe") {
+                    vm.resetPassword()
+                }
+            }
+
+            if let info = vm.infoMessage {
+                Section { Text(info).foregroundStyle(.green) }
+            }
+
+            if let error = vm.error {
+                Section { Text(error).foregroundStyle(.red) }
+            }
+
+            Section {
                 Button("Déconnexion") {
                     vm.signOut(onDone: onSignOut)
                 }
             }
         }
         .navigationTitle("Profil")
-        .onAppear { vm.start() }
+        .onAppear {
+            vm.start()
+            pseudoDraft = vm.me?.pseudo ?? pseudoDraft
+            selectedProfileIcon = vm.me?.profileIcon ?? selectedProfileIcon
+        }
+        .onChange(of: vm.me?.pseudo ?? "") { _, newValue in
+            if !newValue.isEmpty, pseudoDraft.isEmpty {
+                pseudoDraft = newValue
+            }
+        }
+    }
+}
+
+private struct ProfileAvatarView: View {
+    let profileIcon: String
+
+    var body: some View {
+        EmojiAvatarView(profileIcon: profileIcon, size: 104)
     }
 }

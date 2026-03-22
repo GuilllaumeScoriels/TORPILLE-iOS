@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invitation Torpille</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --card: #121a2b;
+      --accent: #ffb703;
+      --accent-2: #3a86ff;
+      --text: #f8fafc;
+      --muted: #cbd5e1;
+      --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at top, #17233f 0%, var(--bg) 55%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(100%, 520px);
+      background: rgba(18, 26, 43, 0.94);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+    }
+    .logo {
+      width: 68px;
+      height: 68px;
+      display: grid;
+      place-items: center;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(255,183,3,0.18), rgba(58,134,255,0.18));
+      font-size: 34px;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: var(--muted); line-height: 1.5; }
+    .community {
+      margin: 18px 0;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      word-break: break-all;
+    }
+    .actions {
+      display: grid;
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .button {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      padding: 14px 18px;
+      border-radius: 14px;
+      text-decoration: none;
+      color: white;
+      font-weight: 700;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .button:hover { transform: translateY(-1px); opacity: 0.96; }
+    .primary { background: linear-gradient(135deg, var(--accent), #fb8500); color: #1b1b1b; }
+    .secondary { background: linear-gradient(135deg, var(--accent-2), #8338ec); }
+    .ghost { background: rgba(255,255,255,0.06); border: 1px solid var(--border); }
+    .footer { margin-top: 16px; font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="logo">🎯</div>
+    <h1>Rejoins ta communauté Torpille</h1>
+    <p>Choisis ta plateforme pour installer l’application, puis ouvre à nouveau ce lien pour rejoindre directement la communauté.</p>
+    <div class="community">
+      <strong>Identifiant communauté :</strong>
+      <div id="community-id">Chargement…</div>
+    </div>
+    <div class="actions">
+      <a id="android-link" class="button primary" href="https://play.google.com/store/apps/details?id=com.torpille.android">Télécharger sur Android</a>
+      <a id="ios-link" class="button secondary" href="https://apps.apple.com/app/id0000000000">Télécharger sur iPhone</a>
+      <a id="open-app-link" class="button ghost" href="#">Ouvrir dans l’app Torpille</a>
+    </div>
+    <div class="footer">
+      Remplace l’URL App Store par l’URL réelle de l’application iOS avant déploiement.
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const communityId = params.get('cid') || '';
+    const communityNode = document.getElementById('community-id');
+    const openAppLink = document.getElementById('open-app-link');
+
+    if (communityId) {
+      communityNode.textContent = communityId;
+      openAppLink.href = `torpille://join?cid=${encodeURIComponent(communityId)}`;
+    } else {
+      communityNode.textContent = 'Aucun identifiant transmis.';
+      openAppLink.href = 'torpille://';
+    }
+  </script>
+</body>
+</html>
