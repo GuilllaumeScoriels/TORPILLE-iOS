@@ -2,10 +2,12 @@ import SwiftUI
 
 struct AuthScreen: View {
     @StateObject private var vm: AuthViewModel
-    let onAuthed: () -> Void
+    let onSignedIn: () -> Void
+    let onSignedUp: () -> Void
 
-    init(onAuthed: @escaping () -> Void, env: AppEnvironment) {
-        self.onAuthed = onAuthed
+    init(onSignedIn: @escaping () -> Void, onSignedUp: @escaping () -> Void, env: AppEnvironment) {
+        self.onSignedIn = onSignedIn
+        self.onSignedUp = onSignedUp
         _vm = StateObject(wrappedValue: AuthViewModel(authRepository: env.authRepository))
     }
 
@@ -18,11 +20,11 @@ struct AuthScreen: View {
                     .autocorrectionDisabled()
                 SecureField("Mot de passe", text: $vm.password)
                 Button(vm.isLoading ? "Chargement…" : "Se connecter") {
-                    vm.signIn(onSuccess: onAuthed)
+                    vm.signIn(onSuccess: onSignedIn)
                 }
                 .disabled(vm.isLoading)
                 Button("Créer un compte") {
-                    vm.signUp(onSuccess: onAuthed)
+                    vm.signUp(onSuccess: onSignedUp)
                 }
                 .disabled(vm.isLoading)
                 Button("Mot de passe oublié") {
@@ -49,7 +51,7 @@ struct ProfileSetupScreen: View {
 
     init(onDone: @escaping () -> Void, env: AppEnvironment) {
         self.onDone = onDone
-        _vm = StateObject(wrappedValue: ProfileViewModel(repo: env.userRepository))
+        _vm = StateObject(wrappedValue: ProfileViewModel(repo: env.userRepository, authRepository: env.authRepository))
     }
 
     var body: some View {
@@ -59,6 +61,13 @@ struct ProfileSetupScreen: View {
                     Spacer()
                     EmojiAvatarView(profileIcon: vm.selectedProfileIcon, size: 96)
                     Spacer()
+                }
+
+                if !vm.email.isEmpty {
+                    LabeledContent("Email") {
+                        Text(vm.email)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 ProfileIconPicker(selectedIcon: $vm.selectedProfileIcon)

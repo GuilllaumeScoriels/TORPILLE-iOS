@@ -16,6 +16,21 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAppCheck
+
+final class TorpilleAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+        #if DEBUG
+        return AppCheckDebugProvider(app: app)
+        #else
+        if #available(iOS 14.0, *) {
+            return AppAttestProvider(app: app)
+        } else {
+            return DeviceCheckProvider(app: app)
+        }
+        #endif
+    }
+}
 
 @main
 struct TorpilleIOSApp: App {
@@ -25,6 +40,8 @@ struct TorpilleIOSApp: App {
     init() {
         if FirebaseApp.app() == nil,
            Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+
+            AppCheck.setAppCheckProviderFactory(TorpilleAppCheckProviderFactory())
             FirebaseApp.configure()
         }
 

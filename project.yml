@@ -47,3 +47,5 @@ targets:
         product: FirebaseStorage
       - package: Firebase
         product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAppCheck

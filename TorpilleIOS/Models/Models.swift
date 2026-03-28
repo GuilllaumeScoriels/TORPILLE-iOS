@@ -4,6 +4,7 @@ import FirebaseFirestore
 struct UserProfile: Codable, Identifiable {
     @DocumentID var documentId: String?
     var uid: String = ""
+    var email: String?
     var pseudo: String = ""
     var pseudoKey: String = ""
     var photoUrl: String?

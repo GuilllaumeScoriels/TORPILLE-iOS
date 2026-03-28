@@ -7,6 +7,11 @@ import FirebaseCore
 import FirebaseFunctions
 import FirebaseStorage
 
+private func debugDescribeStorageError(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "domain=\(nsError.domain) code=\(nsError.code) userInfo=\(nsError.userInfo)"
+}
+
 final class LocationService: NSObject, ObservableObject {
     private let manager = CLLocationManager()
     private var locationContinuation: CheckedContinuation<CLLocation, Error>?
@@ -177,6 +182,7 @@ final class VideoTransferService {
 
     func uploadProfileImage(uid: String, imageData: Data, filename: String) async throws -> UploadedImage {
         try await ensureAuthenticatedSession()
+        print("✅ ensureAuthenticatedSession ok")
 
         let path = "users/\(uid)/profile/\(filename)"
         var lastError: Error?
@@ -227,15 +233,41 @@ final class VideoTransferService {
         return url
     }
 
+    func resolveStoragePlaybackURL(path: String, bucket: String?) async throws -> URL {
+        guard Auth.auth().currentUser != nil else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        let storage: Storage
+        if let bucket, !bucket.isEmpty {
+            storage = Storage.storage(url: "gs://\(bucket)")
+        } else {
+            storage = Storage.storage()
+        }
+
+        let ref = storage.reference(withPath: path)
+        return try await ref.downloadURL()
+    }
+
 
     @discardableResult
     private func uploadFile(localFileURL: URL, storagePath: String) async throws -> String {
         let metadata = makeMetadata(for: localFileURL)
 
+        print("📍 VideoTransferService.uploadFile")
+        print("🪣 configuredBucket =", configuredBucket)
+        print("🪣 candidateBuckets =", candidateBuckets)
+        print("🪣 storagePath =", storagePath)
+        print("📁 localFileURL =", localFileURL.path)
+        print("📁 file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
+        print("📁 metadata.contentType =", metadata.contentType ?? "nil")
+
         let fileData: Data
         do {
             fileData = try Data(contentsOf: localFileURL, options: .mappedIfSafe)
+            print("📁 fileData.count =", fileData.count)
         } catch {
+            print("🔥 uploadFile read local file failed:", debugDescribeStorageError(error))
             throw TorpilleError.uploadFailed("Impossible de lire le média sélectionné avant l'envoi.")
         }
 
@@ -244,6 +276,7 @@ final class VideoTransferService {
         }
 
         try await ensureAuthenticatedSession()
+        print("✅ ensureAuthenticatedSession ok")
 
         var lastError: Error?
         var attemptedBuckets: [String] = []
@@ -252,10 +285,14 @@ final class VideoTransferService {
             attemptedBuckets.append(bucket)
             do {
                 let storage = Self.storage(for: bucket)
+                print("🪣 bucket =", storage.reference().bucket)
+                print("🪣 full path =", storagePath)
                 let ref = storage.reference(withPath: storagePath)
                 _ = try await ref.putDataAsync(fileData, metadata: metadata)
+                print("✅ putDataAsync ok on bucket =", bucket)
                 return bucket
             } catch {
+                print("🔥 putDataAsync failed on bucket \(bucket):", debugDescribeStorageError(error))
                 lastError = error
             }
         }
@@ -326,7 +363,17 @@ final class VideoTransferService {
             throw TorpilleError.notAuthenticated
         }
 
-        _ = try await user.getIDTokenResult(forcingRefresh: true)
+        print("🔐 ensureAuthenticatedSession uid =", user.uid)
+        print("🔐 ensureAuthenticatedSession email =", user.email ?? "nil")
+        do {
+            let result = try await user.getIDTokenResult(forcingRefresh: true)
+            print("✅ ensureAuthenticatedSession token refresh ok")
+            print("🔐 authTime =", result.authDate)
+            print("🔐 expiration =", result.expirationDate)
+        } catch {
+            print("🔥 ensureAuthenticatedSession failed:", debugDescribeStorageError(error))
+            throw error
+        }
     }
 
     private static func storage(for bucket: String) -> Storage {

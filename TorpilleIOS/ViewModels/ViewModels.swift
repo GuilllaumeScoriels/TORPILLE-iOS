@@ -18,6 +18,15 @@ import Foundation
 import SwiftUI
 import FirebaseFirestore
 
+private func debugErrorMessage(_ error: Error) -> String {
+    let nsError = error as NSError
+    return """
+    \(nsError.domain) (\(nsError.code))
+    \(nsError.localizedDescription)
+    \(nsError.userInfo)
+    """
+}
+
 enum AppRoute: Equatable {
     case splash
     case auth
@@ -55,7 +64,7 @@ final class AppRootViewModel: ObservableObject {
                 route = hasPseudo ? .home : .profile
             }
         } catch {
-            route = .profile
+            route = .auth
         }
     }
 
@@ -90,7 +99,7 @@ final class AppRootViewModel: ObservableObject {
                 route = .join(communityId)
             }
         } catch {
-            route = .profile
+            route = .auth
         }
     }
 
@@ -159,7 +168,7 @@ final class AuthViewModel: ObservableObject {
                 try await authRepository.sendPasswordReset(email: cleanEmail)
                 infoMessage = "Un email de réinitialisation a été envoyé à \(cleanEmail)."
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -202,9 +211,15 @@ final class ProfileViewModel: ObservableObject {
     @Published var selectedProfileIcon = "🍺"
 
     private let repo: UserRepository
+    private let authRepository: AuthRepository
 
-    init(repo: UserRepository) {
+    var email: String {
+        authRepository.currentEmail
+    }
+
+    init(repo: UserRepository, authRepository: AuthRepository) {
         self.repo = repo
+        self.authRepository = authRepository
     }
 
     func save(onDone: @escaping () -> Void) {
@@ -221,7 +236,7 @@ final class ProfileViewModel: ObservableObject {
                 }
                 onDone()
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -270,7 +285,7 @@ final class HomeViewModel: ObservableObject {
                 try await userRepository.updateProfile(pseudo: pseudo, imageData: imageData, profileIcon: profileIcon)
                 infoMessage = "Profil mis à jour."
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -289,7 +304,7 @@ final class HomeViewModel: ObservableObject {
                 try await authRepository.sendPasswordReset(email: cleanEmail)
                 infoMessage = "Un email de réinitialisation a été envoyé à \(cleanEmail)."
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -299,7 +314,7 @@ final class HomeViewModel: ObservableObject {
             try authRepository.signOut()
             onDone()
         } catch {
-            self.error = error.localizedDescription
+            self.error = debugErrorMessage(error)
         }
     }
 
@@ -338,7 +353,7 @@ final class CreateCommunityViewModel: ObservableObject {
                 let id = try await repo.createCommunity(name: name, isPublic: isPublic, responseTimeSeconds: response, me: me)
                 onCreated(id)
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -367,7 +382,7 @@ final class JoinCommunityViewModel: ObservableObject {
             try await repo.joinCommunity(communityId: communityId, me: me)
             onJoined()
         } catch {
-            self.error = error.localizedDescription
+            self.error = debugErrorMessage(error)
         }
     }
 }
@@ -417,7 +432,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 }
                 try await repo.updateCommunitySettings(communityId: communityId, isPublic: isPublic, responseTimeSeconds: response)
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -494,7 +509,7 @@ final class CommunityViewModel: ObservableObject {
                 let senderPseudo = try await resolveSenderPseudo()
                 try await communityRepo.sendText(communityId: communityId, senderPseudo: senderPseudo, text: trimmedText)
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -513,7 +528,7 @@ final class CommunityViewModel: ObservableObject {
                     durationSeconds: durationSeconds
                 )
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -535,7 +550,16 @@ final class CommunityViewModel: ObservableObject {
                     tagY: tagY
                 )
             } catch {
-                self.error = error.localizedDescription
+                let nsError = error as NSError
+                print("🔥 sendVideoTorpille failed")
+                print("domain =", nsError.domain)
+                print("code =", nsError.code)
+                print("userInfo =", nsError.userInfo)
+                self.error = """
+                \(nsError.domain) (\(nsError.code))
+                \(nsError.localizedDescription)
+                \(nsError.userInfo)
+                """
             }
         }
     }
@@ -560,7 +584,16 @@ final class CommunityViewModel: ObservableObject {
                     tagY: tagY
                 )
             } catch {
-                self.error = error.localizedDescription
+                let nsError = error as NSError
+                print("🔥 respond failed")
+                print("domain =", nsError.domain)
+                print("code =", nsError.code)
+                print("userInfo =", nsError.userInfo)
+                self.error = """
+                \(nsError.domain) (\(nsError.code))
+                \(nsError.localizedDescription)
+                \(nsError.userInfo)
+                """
             }
         }
     }
@@ -574,7 +607,7 @@ final class CommunityViewModel: ObservableObject {
         }
 
         if let audioPath = message.audioPath {
-            return try await communityRepo.getSignedPlaybackURL(videoPath: audioPath, videoBucket: message.audioBucket)
+            return try await communityRepo.getStoragePlaybackURL(path: audioPath, bucket: message.audioBucket)
         }
         if let videoPath = message.videoPath {
             return try await communityRepo.getSignedPlaybackURL(videoPath: videoPath, videoBucket: message.videoBucket)
@@ -633,7 +666,7 @@ final class MapViewModel: ObservableObject {
                 let location = try await locationService.currentLocation()
                 try await repo.updateMyLocation(in: communities.map { $0.stableId }, latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
             } catch {
-                self.error = error.localizedDescription
+                self.error = debugErrorMessage(error)
             }
         }
     }

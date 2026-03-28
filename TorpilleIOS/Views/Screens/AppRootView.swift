@@ -21,8 +21,10 @@ struct AppRootView: View {
                     ProgressView("Chargement…")
                         .task { await viewModel.bootstrap() }
                 case .auth:
-                    AuthScreen(onAuthed: {
+                    AuthScreen(onSignedIn: {
                         Task { await viewModel.resumePendingJoinIfPossible() }
+                    }, onSignedUp: {
+                        viewModel.route = .profile
                     }, env: viewModel.env)
                 case .profile:
                     ProfileSetupScreen(onDone: {

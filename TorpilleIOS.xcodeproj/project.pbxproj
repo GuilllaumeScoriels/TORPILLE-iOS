@@ -10,8 +10,10 @@
 		0BEBA5E91B29B7C17F92AF60 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2BB789A998F6FD183F2B6A /* AppRootView.swift */; };
 		1119E14976977C426AE9BB37 /* HomeAndProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */; };
 		191377AD30C0FBAD816714D0 /* CommunityManagementScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */; };
+		2CCE84494D7500292027782C /* ProfileIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761F9F5757429B664D4B31EB /* ProfileIconPicker.swift */; };
 		2EF964A1ECE7F6E83640CFC2 /* AuthAndProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */; };
 		3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = E2E09631B134A550ACDC8D1A /* FirebaseFunctions */; };
+		3F40498BB3C640175217D86A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7CF9380A20A6DDDE15280E09 /* Assets.xcassets */; };
 		4292617431C7DEA5760A57B1 /* ViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95EACA6D577C51EE7ABC6053 /* ViewModels.swift */; };
 		438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CDE4B57F9F155C293EE67E /* Extensions.swift */; };
 		6055744D173296386DDA3F65 /* TorpilleError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6634C3E76FAFDB49546301F0 /* TorpilleError.swift */; };
@@ -26,12 +28,11 @@
 		BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 531C40D33B3B99A388E7B82C /* FirebaseStorage */; };
 		C427DB57A47F820B4B9A11D9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */; };
 		D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E329F91D0D4B014C3849EF5 /* Repositories.swift */; };
+		E5EF1EF19F3E06F668B4FA48 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = FD169FB567F235A78A78B6BC /* FirebaseAppCheck */; };
 		EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */; };
 		F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */; };
 		F1653428046986CDF8C8705D /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6886502F638EEDCBDFCF2712 /* Services.swift */; };
 		F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E4083DDC571C6B8CCA46FABE /* FirebaseCore */; };
-		A1B2C3D4E5F6000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000002 /* Assets.xcassets */; };
-		ABCDEF1234567890ABCDEF01 /* ProfileIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF1234567890ABCDEF02 /* ProfileIconPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +45,8 @@
 		6634C3E76FAFDB49546301F0 /* TorpilleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleError.swift; sourceTree = "<group>"; };
 		6886502F638EEDCBDFCF2712 /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
 		74F2CE85C47077B0755CDEC0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		761F9F5757429B664D4B31EB /* ProfileIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileIconPicker.swift; sourceTree = "<group>"; };
+		7CF9380A20A6DDDE15280E09 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityManagementScreens.swift; sourceTree = "<group>"; };
 		8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerSheet.swift; sourceTree = "<group>"; };
 		8F2BB789A998F6FD183F2B6A /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
@@ -52,11 +55,10 @@
 		97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAndProfileScreens.swift; sourceTree = "<group>"; };
 		A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthAndProfileScreens.swift; sourceTree = "<group>"; };
 		B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityScreen.swift; sourceTree = "<group>"; };
+		B278BC9EEADDD55481644665 /* TorpilleIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TorpilleIOS.entitlements; sourceTree = "<group>"; };
 		BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleursMapScreen.swift; sourceTree = "<group>"; };
 		C3CDE4B57F9F155C293EE67E /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleIOSApp.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F6000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		ABCDEF1234567890ABCDEF02 /* ProfileIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileIconPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -69,6 +71,7 @@
 				3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */,
 				BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */,
 				F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */,
+				E5EF1EF19F3E06F668B4FA48 /* FirebaseAppCheck in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -124,6 +127,7 @@
 		859201E0F28D0D79206E82C8 /* TorpilleIOS */ = {
 			isa = PBXGroup;
 			children = (
+				B278BC9EEADDD55481644665 /* TorpilleIOS.entitlements */,
 				86ECAA8F15E904A08FFD3941 /* Core */,
 				7A6D8CF653DFFE0A36CC3C64 /* Models */,
 				D068797546ACE0EB1DA40B49 /* Repositories */,
@@ -148,7 +152,7 @@
 		8B508089A8CF92DB38AF26A5 /* Components */ = {
 			isa = PBXGroup;
 			children = (
-				ABCDEF1234567890ABCDEF02 /* ProfileIconPicker.swift */,
+				761F9F5757429B664D4B31EB /* ProfileIconPicker.swift */,
 				2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */,
 				5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */,
 				8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */,
@@ -176,7 +180,7 @@
 		F3C88B178F539236CEE1AA86 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				A1B2C3D4E5F6000000000002 /* Assets.xcassets */,
+				7CF9380A20A6DDDE15280E09 /* Assets.xcassets */,
 				2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */,
 				74F2CE85C47077B0755CDEC0 /* Info.plist */,
 			);
@@ -205,6 +209,7 @@
 				E2E09631B134A550ACDC8D1A /* FirebaseFunctions */,
 				531C40D33B3B99A388E7B82C /* FirebaseStorage */,
 				E4083DDC571C6B8CCA46FABE /* FirebaseCore */,
+				FD169FB567F235A78A78B6BC /* FirebaseAppCheck */,
 			);
 			productName = TorpilleIOS;
 			productReference = 4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */;
@@ -246,7 +251,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D4E5F6000000000001 /* Assets.xcassets in Resources */,
+				3F40498BB3C640175217D86A /* Assets.xcassets in Resources */,
 				9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -266,6 +271,7 @@
 				438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */,
 				1119E14976977C426AE9BB37 /* HomeAndProfileScreens.swift in Sources */,
 				8BC2597AE67620D04F9412FA /* Models.swift in Sources */,
+				2CCE84494D7500292027782C /* ProfileIconPicker.swift in Sources */,
 				D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */,
 				F1653428046986CDF8C8705D /* Services.swift in Sources */,
 				6055744D173296386DDA3F65 /* TorpilleError.swift in Sources */,
@@ -346,11 +352,11 @@
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"]]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\"]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une photo de profil ou une vidéo à envoyer.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -434,11 +440,11 @@
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"]]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\"]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une photo de profil ou une vidéo à envoyer.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -509,6 +515,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
+		};
+		FD169FB567F235A78A78B6BC /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

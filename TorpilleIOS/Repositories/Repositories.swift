@@ -4,6 +4,24 @@ import FirebaseFirestore
 import FirebaseFunctions
 import FirebaseStorage
 
+private func debugDescribe(_ error: Error) -> String {
+    let nsError = error as NSError
+    return """
+    domain = \(nsError.domain)
+    code = \(nsError.code)
+    description = \(nsError.localizedDescription)
+    userInfo = \(nsError.userInfo)
+    """
+}
+
+private func debugLog(_ label: String, _ error: Error) {
+    let nsError = error as NSError
+    print("🔥 \(label)")
+    print("domain =", nsError.domain)
+    print("code =", nsError.code)
+    print("userInfo =", nsError.userInfo)
+}
+
 final class AuthRepository {
     private let auth = Auth.auth()
 
@@ -11,11 +29,27 @@ final class AuthRepository {
     var currentEmail: String { auth.currentUser?.email ?? "" }
 
     func signUp(email: String, password: String) async throws {
-        _ = try await auth.createUser(withEmail: email, password: password)
+        print("📍 AuthRepository.signUp")
+        print("📧 email =", email)
+        do {
+            let result = try await auth.createUser(withEmail: email, password: password)
+            print("✅ signUp ok uid =", result.user.uid)
+        } catch {
+            debugLog("AuthRepository.signUp failed", error)
+            throw error
+        }
     }
 
     func signIn(email: String, password: String) async throws {
-        _ = try await auth.signIn(withEmail: email, password: password)
+        print("📍 AuthRepository.signIn")
+        print("📧 email =", email)
+        do {
+            let result = try await auth.signIn(withEmail: email, password: password)
+            print("✅ signIn ok uid =", result.user.uid)
+        } catch {
+            debugLog("AuthRepository.signIn failed", error)
+            throw error
+        }
     }
 
     func sendPasswordReset(email: String) async throws {
@@ -40,6 +74,7 @@ final class UserRepository {
         return UserProfile(
             documentId: snapshot.documentID,
             uid: (data["uid"] as? String) ?? fallbackUID,
+            email: (data["email"] as? String) ?? auth.currentUser?.email,
             pseudo: (data["pseudo"] as? String) ?? "",
             pseudoKey: (data["pseudoKey"] as? String) ?? "",
             photoUrl: data["photoUrl"] as? String,
@@ -52,11 +87,16 @@ final class UserRepository {
 
     func getMeOrThrow() async throws -> UserProfile {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let snapshot = try await users.document(uid).getDocument()
-        guard snapshot.exists else {
-            throw TorpilleError.missingData("Profil introuvable")
+        do {
+            let snapshot = try await users.document(uid).getDocument()
+            guard snapshot.exists else {
+                throw TorpilleError.missingData("Profil introuvable")
+            }
+            return decodeUserProfile(from: snapshot, fallbackUID: uid)
+        } catch {
+            debugLog("UserRepository.getMeOrThrow failed", error)
+            throw error
         }
-        return decodeUserProfile(from: snapshot, fallbackUID: uid)
     }
 
     func observeMe(handler: @escaping (UserProfile?) -> Void) -> ListenerRegistration? {
@@ -75,6 +115,11 @@ final class UserRepository {
 
     func upsertProfile(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        print("📍 UserRepository.upsertProfile")
+        print("👤 uid =", uid)
+        print("👤 pseudo =", pseudo)
+        print("👤 photoURL =", photoURL ?? "nil")
+        print("👤 profileIcon =", profileIcon ?? "nil")
         let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count >= 3, clean.count <= 20,
               clean.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }) else {
@@ -84,8 +129,10 @@ final class UserRepository {
         let pseudoKey = clean.normalizedPseudoKey
         let userRef = users.document(uid)
         let pseudoRef = pseudos.document(pseudoKey)
+        let currentEmail = auth.currentUser?.email?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        _ = try await db.runTransaction { transaction, errorPointer in
+        do {
+            _ = try await db.runTransaction { transaction, errorPointer in
             do {
                 let userSnapshot = try transaction.getDocument(userRef)
                 let pseudoSnapshot = try transaction.getDocument(pseudoRef)
@@ -119,9 +166,18 @@ final class UserRepository {
                     "pseudo": clean,
                     "pseudoKey": pseudoKey,
                     "updatedAt": now,
-                    "photoUrl": resolvedPhotoURL as Any,
                     "profileIcon": resolvedProfileIcon
                 ]
+
+                if let currentEmail, !currentEmail.isEmpty {
+                    payload["email"] = currentEmail
+                }
+
+                if let resolvedPhotoURL, !resolvedPhotoURL.isEmpty {
+                    payload["photoUrl"] = resolvedPhotoURL
+                } else {
+                    payload["photoUrl"] = FieldValue.delete()
+                }
 
                 if userSnapshot.data()?["createdAt"] == nil {
                     payload["createdAt"] = now
@@ -137,20 +193,51 @@ final class UserRepository {
                 errorPointer?.pointee = error as NSError
                 return nil
             }
+            }
+        } catch {
+            debugLog("UserRepository.upsertProfile transaction failed", error)
+            throw error
         }
     }
 
     func updateProfile(pseudo: String, imageData: Data?, profileIcon: String?) async throws {
+        print("📍 UserRepository.updateProfile")
+        print("👤 auth uid =", auth.currentUser?.uid ?? "nil")
+        print("👤 auth email =", auth.currentUser?.email ?? "nil")
+        print("👤 pseudo =", pseudo)
+        print("👤 has imageData =", imageData != nil)
+        print("👤 profileIcon =", profileIcon ?? "nil")
+
         var uploadedURL: String?
         if let imageData, let uid = auth.currentUser?.uid {
+            print("🖼 image byteCount =", imageData.count)
             let compressed = imageData
             let filename = "profile_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-            let uploaded = try await transferService.uploadProfileImage(uid: uid, imageData: compressed, filename: filename)
-            uploadedURL = uploaded.downloadURL
+            do {
+                let uploaded = try await transferService.uploadProfileImage(uid: uid, imageData: compressed, filename: filename)
+                uploadedURL = uploaded.downloadURL
+                print("✅ uploadProfileImage ok bucket = \(uploaded.bucket) path = \(uploaded.storagePath)")
+            } catch {
+                debugLog("UserRepository.updateProfile uploadProfileImage failed", error)
+                throw error
+            }
         }
 
-        try await upsertProfile(pseudo: pseudo, photoURL: uploadedURL, profileIcon: profileIcon)
-        try await propagateProfileToCommunityMemberships()
+        do {
+            try await upsertProfile(pseudo: pseudo, photoURL: uploadedURL, profileIcon: profileIcon)
+            print("✅ upsertProfile ok")
+        } catch {
+            debugLog("UserRepository.updateProfile upsertProfile failed", error)
+            throw error
+        }
+
+        do {
+            try await propagateProfileToCommunityMemberships()
+            print("✅ propagateProfileToCommunityMemberships ok")
+        } catch {
+            debugLog("UserRepository.updateProfile propagateProfileToCommunityMemberships failed", error)
+            throw error
+        }
     }
 
     private func propagateProfileToCommunityMemberships() async throws {
@@ -175,13 +262,13 @@ final class CommunityRepository {
     private let db = Firestore.firestore()
     private let functions = Functions.functions(region: "europe-west1")
     private let videoTransfer = VideoTransferService()
-
+    
     private var communities: CollectionReference { db.collection("communities") }
-
+    
     func inviteLink(for communityId: String) -> String {
         "https://torpille-38783.web.app/join?cid=\(communityId)"
     }
-
+    
     func getCommunityOrThrow(_ communityId: String) async throws -> Community {
         let snapshot = try await communities.document(communityId).getDocument()
         guard snapshot.exists else {
@@ -189,7 +276,7 @@ final class CommunityRepository {
         }
         return try snapshot.data(as: Community.self)
     }
-
+    
     func createCommunity(name: String, isPublic: Bool, responseTimeSeconds: Int64, me: UserProfile) async throws -> String {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let doc = communities.document()
@@ -206,13 +293,13 @@ final class CommunityRepository {
         try doc.collection("members").document(uid).setData(from: member)
         return doc.documentID
     }
-
+    
     func joinCommunity(communityId: String, me: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, profileIcon: me.profileIcon, xpInCommunity: 0)
         try communities.document(communityId).collection("members").document(uid).setData(from: member, merge: true)
     }
-
+    
     func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let community = try await getCommunityOrThrow(communityId)
@@ -224,7 +311,7 @@ final class CommunityRepository {
             "responseTimeSeconds": responseTimeSeconds
         ])
     }
-
+    
     func observeCommunity(_ communityId: String, handler: @escaping (Community?) -> Void) -> ListenerRegistration {
         communities.document(communityId).addSnapshotListener { snapshot, _ in
             guard let snapshot, snapshot.exists else {
@@ -234,13 +321,13 @@ final class CommunityRepository {
             handler(try? snapshot.data(as: Community.self))
         }
     }
-
+    
     func observeCommunitiesForMe(handler: @escaping ([Community]) -> Void) -> ListenerRegistration? {
         guard let uid = auth.currentUser?.uid else {
             handler([])
             return nil
         }
-
+        
         return db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snapshot, _ in
@@ -259,18 +346,18 @@ final class CommunityRepository {
                 }
             }
     }
-
+    
     func myCommunityIds() async throws -> [String] {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-
+        
         let snapshot = try await db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .getDocuments()
-
+        
         let ids = snapshot.documents.compactMap { $0.reference.parent.parent?.documentID }
         return Array(Set(ids)).sorted()
     }
-
+    
     func observeMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
         communities.document(communityId)
             .collection("members")
@@ -280,7 +367,7 @@ final class CommunityRepository {
                 handler(values)
             }
     }
-
+    
     func observeMyMember(_ communityId: String, handler: @escaping (Member?) -> Void) -> ListenerRegistration? {
         guard let uid = auth.currentUser?.uid else {
             handler(nil)
@@ -297,7 +384,7 @@ final class CommunityRepository {
                 handler(try? snapshot.data(as: Member.self))
             }
     }
-
+    
     func observeMessages(_ communityId: String, handler: @escaping ([Message]) -> Void) -> ListenerRegistration {
         communities.document(communityId)
             .collection("messages")
@@ -312,9 +399,14 @@ final class CommunityRepository {
                 handler(values)
             }
     }
-
+    
     func sendText(communityId: String, senderPseudo: String, text: String) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        print("📍 CommunityRepository.sendText")
+        print("💬 communityId =", communityId)
+        print("💬 uid =", uid)
+        print("💬 senderPseudo =", senderPseudo)
+        print("💬 text =", text)
         let payload: [String: Any] = [
             "type": "text",
             "senderUid": uid,
@@ -322,18 +414,59 @@ final class CommunityRepository {
             "text": text,
             "createdAt": Timestamp(date: Date())
         ]
-        _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+        do {
+            _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+            print("✅ sendText addDocument ok")
+        } catch {
+            debugLog("CommunityRepository.sendText addDocument failed", error)
+            throw error
+        }
     }
-
+    
     func sendAudioMessage(communityId: String, senderPseudo: String, localFileURL: URL, durationSeconds: Double) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+
+        print("📍 CommunityRepository.sendAudioMessage")
+        print("🔐 auth.currentUser =", auth.currentUser?.uid ?? "nil")
+        print("🔐 auth email =", auth.currentUser?.email ?? "nil")
+
+        do {
+            let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: true)
+            print("✅ ID token refresh ok")
+            print("🔐 token =", token?.token.prefix(20) ?? "nil")
+        } catch {
+            debugLog("CommunityRepository.sendAudioMessage getIDTokenResult failed", error)
+            throw error
+        }
+
+        print("🎤 communityId =", communityId)
+        print("🎤 senderPseudo =", senderPseudo)
+        print("🎤 localFileURL =", localFileURL.path)
+        print("🎤 file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
+        do {
+            let values = try localFileURL.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
+            print("🎤 file size =", values.fileSize ?? -1)
+            print("🎤 content type =", values.contentType?.preferredMIMEType ?? "nil")
+        } catch {
+            print("🔥 Unable to inspect local audio file:", error)
+        }
+
         let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).m4a"
-        let uploaded = try await videoTransfer.uploadCommunityAudio(
-            communityId: communityId,
-            localFileURL: localFileURL,
-            filename: filename,
-            durationSeconds: durationSeconds
-        )
+        let uploaded: UploadedAudio
+        do {
+            uploaded = try await videoTransfer.uploadCommunityAudio(
+                communityId: communityId,
+                localFileURL: localFileURL,
+                filename: filename,
+                durationSeconds: durationSeconds
+            )
+            print("✅ audio upload ok")
+            print("bucket =", uploaded.bucket)
+            print("path =", uploaded.storagePath)
+        } catch {
+            debugLog("CommunityRepository.sendAudioMessage uploadCommunityAudio failed", error)
+            throw error
+        }
 
         let payload: [String: Any] = [
             "type": "audio",
@@ -344,13 +477,23 @@ final class CommunityRepository {
             "audioDurationSeconds": uploaded.durationSeconds,
             "createdAt": Timestamp(date: Date())
         ]
-        _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+        do {
+            _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+            print("✅ sendText addDocument ok")
+        } catch {
+            debugLog("CommunityRepository.sendText addDocument failed", error)
+            throw error
+        }
     }
-
+    
     func getSignedPlaybackURL(videoPath: String, videoBucket: String?) async throws -> URL {
         try await videoTransfer.resolvePlaybackURL(videoPath: videoPath, videoBucket: videoBucket)
     }
 
+    func getStoragePlaybackURL(path: String, bucket: String?) async throws -> URL {
+        try await videoTransfer.resolveStoragePlaybackURL(path: path, bucket: bucket)
+    }
+    
     func sendVideoTorpille(
         communityId: String,
         senderPseudo: String,
@@ -361,15 +504,57 @@ final class CommunityRepository {
         tagY: Double
     ) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+
+        print("🔐 currentUser.uid =", uid)
+        print("🔐 currentUser.email =", auth.currentUser?.email ?? "nil")
+
+        do {
+            if let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: true) {
+                print("✅ ID token refresh ok")
+                print("🔐 token authTime =", token.authDate)
+                print("🔐 token expiration =", token.expirationDate)
+                print("🔐 token claims =", token.claims)
+            } else {
+                print("🔥 getIDTokenResult returned nil")
+            }
+        } catch {
+            let nsError = error as NSError
+            print("🔥 getIDTokenResult failed")
+            print("domain =", nsError.domain)
+            print("code =", nsError.code)
+            print("userInfo =", nsError.userInfo)
+            throw error
+        }
+
+        print("📍 1. getCommunityOrThrow")
         let community = try await getCommunityOrThrow(communityId)
 
         let fileExtension = localFileURL.pathExtension.isEmpty ? "mov" : localFileURL.pathExtension.lowercased()
         let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).\(fileExtension)"
-        let uploaded = try await videoTransfer.uploadCommunityVideo(
-            communityId: communityId,
-            localFileURL: localFileURL,
-            filename: filename
-        )
+
+        print("🎥 localFileURL =", localFileURL.path)
+        print("🎥 file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
+        do {
+            let values = try localFileURL.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
+            print("🎥 file size =", values.fileSize ?? -1)
+            print("🎥 content type =", values.contentType?.preferredMIMEType ?? "nil")
+        } catch {
+            print("🔥 Unable to inspect local video file:", error)
+        }
+
+        print("📍 2. uploadCommunityVideo")
+        let uploaded: UploadedVideo
+        do {
+            uploaded = try await videoTransfer.uploadCommunityVideo(
+                communityId: communityId,
+                localFileURL: localFileURL,
+                filename: filename
+            )
+            print("✅ upload ok bucket=\(uploaded.bucket) path=\(uploaded.storagePath)")
+        } catch {
+            debugLog("CommunityRepository.sendVideoTorpille uploadCommunityVideo failed", error)
+            throw error
+        }
 
         let createdAt = Timestamp(date: Date())
         let deadlineAt = Timestamp(date: Date().addingTimeInterval(TimeInterval(community.responseTimeSeconds)))
@@ -377,6 +562,7 @@ final class CommunityRepository {
         let msgDoc = communities.document(communityId).collection("messages").document()
 
         let batch = db.batch()
+
         try batch.setData(from: Torpille(
             id: torpDoc.documentID,
             fromUid: uid,
@@ -426,14 +612,35 @@ final class CommunityRepository {
             "xpInCommunity": FieldValue.increment(Int64(10))
         ], forDocument: communities.document(communityId).collection("members").document(uid), merge: true)
 
-        try await batch.commit()
+        print("📍 3. batch.commit")
+        do {
+            try await batch.commit()
+            print("✅ batch.commit ok")
+        } catch {
+            let nsError = error as NSError
+            print("🔥 batch.commit failed")
+            print("domain =", nsError.domain)
+            print("code =", nsError.code)
+            print("userInfo =", nsError.userInfo)
+            throw error
+        }
 
-        _ = try? await functions.httpsCallable("sendTorpilleNotification").call([
-            "toUid": taggedUid,
-            "fromPseudo": senderPseudo,
-            "communityName": community.name,
-            "communityId": communityId
-        ])
+        print("📍 4. sendTorpilleNotification")
+        do {
+            _ = try await functions.httpsCallable("sendTorpilleNotification").call([
+                "toUid": taggedUid,
+                "fromPseudo": senderPseudo,
+                "communityName": community.name,
+                "communityId": communityId
+            ])
+            print("✅ sendTorpilleNotification ok")
+        } catch {
+            let nsError = error as NSError
+            print("⚠️ sendTorpilleNotification failed but torpille already saved")
+            print("domain =", nsError.domain)
+            print("code =", nsError.code)
+            print("userInfo =", nsError.userInfo)
+        }
     }
 
     func respondWithVideo(
@@ -457,6 +664,9 @@ final class CommunityRepository {
             throw TorpilleError.missingData("Cette torpille ne t'est pas destinée")
         }
 
+        print("📍 CommunityRepository.respondWithVideo")
+        print("🎥 response localFileURL =", localFileURL.path)
+        print("🎥 response file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
         let now = Timestamp(date: Date())
         let batch = db.batch()
         batch.updateData([
@@ -471,7 +681,13 @@ final class CommunityRepository {
             "lastRespondedAt": now,
             "xpInCommunity": FieldValue.increment(Int64(15))
         ], forDocument: communities.document(communityId).collection("members").document(uid))
-        try await batch.commit()
+        do {
+            try await batch.commit()
+            print("✅ respondWithVideo pre-batch commit ok")
+        } catch {
+            debugLog("CommunityRepository.respondWithVideo pre-batch commit failed", error)
+            throw error
+        }
 
         try await sendVideoTorpille(
             communityId: communityId,
@@ -483,13 +699,19 @@ final class CommunityRepository {
             tagY: tagY
         )
 
-        try await communities.document(communityId).collection("messages").addDocument(data: [
+        do {
+            try await communities.document(communityId).collection("messages").addDocument(data: [
             "type": "text",
             "senderUid": uid,
             "senderPseudo": senderPseudo,
             "text": "a répondu à une torpille et a relancé !",
             "createdAt": now
-        ])
+            ])
+            print("✅ respondWithVideo text message addDocument ok")
+        } catch {
+            debugLog("CommunityRepository.respondWithVideo text addDocument failed", error)
+            throw error
+        }
     }
 
     func updateMyLocation(in communityIds: [String], latitude: Double, longitude: Double) async throws {
