@@ -588,6 +588,7 @@ final class CommunityViewModel: ObservableObject {
     @Published var members: [Member] = []
     @Published var myMember: Member?
     @Published var me: UserProfile?
+    @Published var unseenTorpilles: [Torpille] = []
     @Published var error: String?
     @Published var isSending = false
 
@@ -597,6 +598,7 @@ final class CommunityViewModel: ObservableObject {
     private var membersRegistration: ListenerRegistration?
     private var myMemberRegistration: ListenerRegistration?
     private var meRegistration: ListenerRegistration?
+    private var torpillesRegistration: ListenerRegistration?
 
     init(communityRepo: CommunityRepository, userRepo: UserRepository) {
         self.communityRepo = communityRepo
@@ -608,6 +610,7 @@ final class CommunityViewModel: ObservableObject {
         membersRegistration?.remove()
         myMemberRegistration?.remove()
         meRegistration?.remove()
+        torpillesRegistration?.remove()
 
         meRegistration = userRepo.observeMe { [weak self] value in
             DispatchQueue.main.async { self?.me = value }
@@ -619,8 +622,26 @@ final class CommunityViewModel: ObservableObject {
             DispatchQueue.main.async { self?.members = values }
         }
         myMemberRegistration = communityRepo.observeMyMember(communityId) { [weak self] value in
-            DispatchQueue.main.async { self?.myMember = value }
+            DispatchQueue.main.async {
+                self?.myMember = value
+                self?.refreshUnseenTorpilles()
+            }
         }
+        torpillesRegistration = communityRepo.observeRecentTorpilles(communityId) { [weak self] values in
+            DispatchQueue.main.async {
+                self?.unseenTorpilles = values
+                self?.refreshUnseenTorpilles()
+            }
+        }
+    }
+
+    private func refreshUnseenTorpilles() {
+        let myUID = me?.uid ?? communityRepo.currentUID
+        let lastSeen = myMember?.lastSeenTorpilleAt?.dateValue() ?? .distantPast
+        unseenTorpilles = unseenTorpilles
+            .filter { $0.fromUid != myUID }
+            .filter { ($0.createdAt?.dateValue() ?? .distantPast) > lastSeen }
+            .sorted { ($0.createdAt?.dateValue() ?? .distantPast) > ($1.createdAt?.dateValue() ?? .distantPast) }
     }
 
     private func resolveSenderPseudo() async throws -> String {
@@ -647,6 +668,25 @@ final class CommunityViewModel: ObservableObject {
             do {
                 let senderPseudo = try await resolveSenderPseudo()
                 try await communityRepo.sendText(communityId: communityId, senderPseudo: senderPseudo, text: trimmedText)
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func sendCapturedMedia(communityId: String, fileURL: URL) {
+        error = nil
+        isSending = true
+        Task {
+            defer { self.isSending = false }
+            do {
+                let senderPseudo = try await resolveSenderPseudo()
+                let ext = fileURL.pathExtension.lowercased()
+                if ["jpg", "jpeg", "png", "heic", "heif"].contains(ext) {
+                    try await communityRepo.sendImageMessage(communityId: communityId, senderPseudo: senderPseudo, localFileURL: fileURL)
+                } else {
+                    try await communityRepo.sendCapturedVideoMessage(communityId: communityId, senderPseudo: senderPseudo, localFileURL: fileURL)
+                }
             } catch {
                 self.error = debugErrorMessage(error)
             }
@@ -690,10 +730,6 @@ final class CommunityViewModel: ObservableObject {
                 )
             } catch {
                 let nsError = error as NSError
-                print("🔥 sendVideoTorpille failed")
-                print("domain =", nsError.domain)
-                print("code =", nsError.code)
-                print("userInfo =", nsError.userInfo)
                 self.error = """
                 \(nsError.domain) (\(nsError.code))
                 \(nsError.localizedDescription)
@@ -724,15 +760,21 @@ final class CommunityViewModel: ObservableObject {
                 )
             } catch {
                 let nsError = error as NSError
-                print("🔥 respond failed")
-                print("domain =", nsError.domain)
-                print("code =", nsError.code)
-                print("userInfo =", nsError.userInfo)
                 self.error = """
                 \(nsError.domain) (\(nsError.code))
                 \(nsError.localizedDescription)
                 \(nsError.userInfo)
                 """
+            }
+        }
+    }
+
+    func markTorpillesSeen(communityId: String) {
+        Task {
+            do {
+                try await communityRepo.markTorpillesSeen(communityId: communityId)
+            } catch {
+                self.error = debugErrorMessage(error)
             }
         }
     }
@@ -744,7 +786,13 @@ final class CommunityViewModel: ObservableObject {
         if message.type == "video", let directURL = message.videoUrl, let url = URL(string: directURL) {
             return url
         }
+        if message.type == "image", let directURL = message.imageUrl, let url = URL(string: directURL) {
+            return url
+        }
 
+        if let imagePath = message.imagePath {
+            return try await communityRepo.getStoragePlaybackURL(path: imagePath, bucket: message.imageBucket)
+        }
         if let audioPath = message.audioPath {
             return try await communityRepo.getStoragePlaybackURL(path: audioPath, bucket: message.audioBucket)
         }
@@ -754,11 +802,22 @@ final class CommunityViewModel: ObservableObject {
         throw TorpilleError.videoNotAvailable
     }
 
+    func resolvePlaybackURL(for torpille: Torpille) async throws -> URL {
+        if let directURL = torpille.videoUrl, let url = URL(string: directURL) {
+            return url
+        }
+        if let videoPath = torpille.videoPath {
+            return try await communityRepo.getSignedPlaybackURL(videoPath: videoPath, videoBucket: torpille.videoBucket)
+        }
+        throw TorpilleError.videoNotAvailable
+    }
+
     deinit {
         messagesRegistration?.remove()
         membersRegistration?.remove()
         myMemberRegistration?.remove()
         meRegistration?.remove()
+        torpillesRegistration?.remove()
     }
 }
 

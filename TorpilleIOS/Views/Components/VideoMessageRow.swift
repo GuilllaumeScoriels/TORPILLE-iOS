@@ -19,7 +19,7 @@ struct VideoMessageRow: View {
                     .labelStyle(.titleAndIcon)
             }
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(Color(.tertiarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -30,6 +30,27 @@ struct VideoMessageRow: View {
             return "Vidéo → @\(taggedPseudo)"
         }
         return "Vidéo"
+    }
+}
+
+struct ImageMessageRow: View {
+    let message: Message
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                Label("Photo", systemImage: "photo.fill")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("Ouvrir")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(12)
+            .background(Color(.tertiarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -59,7 +80,7 @@ struct AudioMessageRow: View {
                     .font(.subheadline.weight(.semibold))
             }
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(Color(.tertiarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)

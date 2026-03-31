@@ -352,6 +352,7 @@ final class UserRepository {
 
 final class CommunityRepository {
     private let auth = Auth.auth()
+    var currentUID: String { auth.currentUser?.uid ?? "" }
     private let db = Firestore.firestore()
     private let functions = Functions.functions(region: "europe-west1")
     private let videoTransfer = VideoTransferService()
@@ -572,6 +573,65 @@ final class CommunityRepository {
         }
     }
 
+    func sendImageMessage(communityId: String, senderPseudo: String, localFileURL: URL) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let fileExtension = localFileURL.pathExtension.isEmpty ? "jpg" : localFileURL.pathExtension.lowercased()
+        let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).\(fileExtension)"
+        let uploaded = try await videoTransfer.uploadCommunityImage(communityId: communityId, localFileURL: localFileURL, filename: filename)
+
+        let payload: [String: Any] = [
+            "type": "image",
+            "senderUid": uid,
+            "senderPseudo": senderPseudo,
+            "imageUrl": uploaded.downloadURL,
+            "imageBucket": uploaded.bucket,
+            "imagePath": uploaded.storagePath,
+            "createdAt": Timestamp(date: Date())
+        ]
+
+        _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+    }
+
+    func sendCapturedVideoMessage(communityId: String, senderPseudo: String, localFileURL: URL) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let fileExtension = localFileURL.pathExtension.isEmpty ? "mov" : localFileURL.pathExtension.lowercased()
+        let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).\(fileExtension)"
+        let uploaded = try await videoTransfer.uploadCommunityVideo(communityId: communityId, localFileURL: localFileURL, filename: filename)
+
+        let payload: [String: Any] = [
+            "type": "video",
+            "senderUid": uid,
+            "senderPseudo": senderPseudo,
+            "videoBucket": uploaded.bucket,
+            "videoPath": uploaded.storagePath,
+            "createdAt": Timestamp(date: Date())
+        ]
+
+        _ = try await communities.document(communityId).collection("messages").addDocument(data: payload)
+    }
+
+    func observeRecentTorpilles(_ communityId: String, handler: @escaping ([Torpille]) -> Void) -> ListenerRegistration {
+        communities.document(communityId)
+            .collection("torpilles")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 40)
+            .addSnapshotListener { snapshot, _ in
+                let values = snapshot?.documents.compactMap { doc -> Torpille? in
+                    var value = try? doc.data(as: Torpille.self)
+                    value?.id = doc.documentID
+                    return value
+                } ?? []
+                handler(values)
+            }
+    }
+
+    func markTorpillesSeen(communityId: String) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        try await communities.document(communityId).collection("members").document(uid).setData([
+            "lastSeenTorpilleAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
     func sendAudioMessage(communityId: String, senderPseudo: String, localFileURL: URL, durationSeconds: Double) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
 
@@ -740,6 +800,9 @@ final class CommunityRepository {
             audioBucket: nil,
             audioPath: nil,
             audioDurationSeconds: nil,
+            imageUrl: nil,
+            imageBucket: nil,
+            imagePath: nil,
             taggedUid: taggedUid,
             taggedPseudo: taggedPseudo,
             tagX: tagX,

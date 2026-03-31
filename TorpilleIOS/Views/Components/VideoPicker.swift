@@ -1,20 +1,80 @@
-/**
- Fichier : VideoPicker.swift
- Rôle :
- - Permet à l'utilisateur de choisir une vidéo depuis la photothèque iOS.
-
- Ce que fait ce fichier :
- - Utilise `PhotosPicker` pour sélectionner un film.
- - Copie le fichier dans un emplacement temporaire stable afin de pouvoir
-   l'envoyer ensuite vers Firebase Storage.
-
- Pourquoi c'est utile :
- - Le portage iOS fournit un flux concret d'envoi vidéo sans dépendre d'UIKit lourd.
- */
-
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import UIKit
+
+enum CameraPickerMode: Equatable {
+    case photoAndVideo
+    case videoOnly
+
+    var mediaTypes: [String] {
+        switch self {
+        case .photoAndVideo:
+            return [UTType.image.identifier, UTType.movie.identifier]
+        case .videoOnly:
+            return [UTType.movie.identifier]
+        }
+    }
+}
+
+struct CameraMediaPicker: UIViewControllerRepresentable {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedFileURL: URL?
+    let allowedTypes: CameraPickerMode
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = allowedTypes.mediaTypes
+        picker.videoQuality = .typeMedium
+        picker.cameraCaptureMode = allowedTypes == .videoOnly ? .video : .photo
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let parent: CameraMediaPicker
+
+        init(_ parent: CameraMediaPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let mediaURL = info[.mediaURL] as? URL {
+                let ext = mediaURL.pathExtension.isEmpty ? "mov" : mediaURL.pathExtension.lowercased()
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension(ext)
+                try? FileManager.default.removeItem(at: destination)
+                do {
+                    try FileManager.default.copyItem(at: mediaURL, to: destination)
+                    parent.selectedFileURL = destination
+                } catch {
+                    parent.selectedFileURL = nil
+                }
+            } else if let image = info[.originalImage] as? UIImage {
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("jpg")
+                if let data = image.jpegData(compressionQuality: 0.85) {
+                    try? data.write(to: destination, options: .atomic)
+                    parent.selectedFileURL = destination
+                }
+            }
+            parent.dismiss()
+        }
+    }
+}
 
 struct VideoPicker: View {
     @Binding var selectedFileURL: URL?
@@ -29,9 +89,7 @@ struct VideoPicker: View {
             }
             .onChange(of: item) { _, newValue in
                 guard let newValue else { return }
-                Task {
-                    await loadFile(from: newValue)
-                }
+                Task { await loadFile(from: newValue) }
             }
 
             if let selectedFileURL {

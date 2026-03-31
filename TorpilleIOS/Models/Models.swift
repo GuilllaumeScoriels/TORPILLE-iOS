@@ -49,6 +49,7 @@ struct Member: Codable, Identifiable {
     var lastLatitude: Double?
     var lastLongitude: Double?
     var lastLocationUpdatedAt: Timestamp?
+    var lastSeenTorpilleAt: Timestamp?
 
     var id: String { uid.isEmpty ? (documentId ?? UUID().uuidString) : uid }
 }
@@ -67,6 +68,9 @@ struct Message: Codable, Identifiable {
     var audioBucket: String?
     var audioPath: String?
     var audioDurationSeconds: Double?
+    var imageUrl: String?
+    var imageBucket: String?
+    var imagePath: String?
     var taggedUid: String?
     var taggedPseudo: String?
     var tagX: Double?

@@ -180,6 +180,13 @@ final class VideoTransferService {
         return UploadedAudio(bucket: bucket, storagePath: path, durationSeconds: durationSeconds)
     }
 
+    func uploadCommunityImage(communityId: String, localFileURL: URL, filename: String) async throws -> UploadedImage {
+        let path = "communities/\(communityId)/images/\(filename)"
+        let bucket = try await uploadFile(localFileURL: localFileURL, storagePath: path)
+        let url = try await resolveStoragePlaybackURL(path: path, bucket: bucket)
+        return UploadedImage(bucket: bucket, storagePath: path, downloadURL: url.absoluteString)
+    }
+
     func uploadProfileImage(uid: String, imageData: Data, filename: String) async throws -> UploadedImage {
         try await ensureAuthenticatedSession()
         print("✅ ensureAuthenticatedSession ok")

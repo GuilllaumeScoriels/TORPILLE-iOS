@@ -29,7 +29,11 @@
 			<array>
 				<string>torpille</string>
 			</array>
-		</dict>
+			<key>NSCameraUsageDescription</key>
+	<string>L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.</string>
+</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
@@ -52,12 +56,20 @@
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
-	</dict>
+		<key>NSCameraUsageDescription</key>
+	<string>L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.</string>
+</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.</string>
 </dict>
 </plist>
