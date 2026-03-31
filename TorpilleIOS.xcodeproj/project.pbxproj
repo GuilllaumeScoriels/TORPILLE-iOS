@@ -12,7 +12,6 @@
 		191377AD30C0FBAD816714D0 /* CommunityManagementScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86115B7A1E697641635A8796 /* CommunityManagementScreens.swift */; };
 		2CCE84494D7500292027782C /* ProfileIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761F9F5757429B664D4B31EB /* ProfileIconPicker.swift */; };
 		2EF964A1ECE7F6E83640CFC2 /* AuthAndProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */; };
-		3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = E2E09631B134A550ACDC8D1A /* FirebaseFunctions */; };
 		3F40498BB3C640175217D86A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7CF9380A20A6DDDE15280E09 /* Assets.xcassets */; };
 		4292617431C7DEA5760A57B1 /* ViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95EACA6D577C51EE7ABC6053 /* ViewModels.swift */; };
 		438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3CDE4B57F9F155C293EE67E /* Extensions.swift */; };
@@ -20,19 +19,20 @@
 		66D01724431526E9BFD73D5F /* TorpilleIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */; };
 		793E8B3817EA02783D5AF4C8 /* VideoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */; };
 		887E062706FDA4DE56465BDA /* VideoMessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */; };
-		89390829B42DCA30992E0C92 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */; };
 		8BC2597AE67620D04F9412FA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9310DBDF1730EFF6694DFF94 /* Models.swift */; };
 		92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */; };
 		9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */; };
-		B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = DA78468648A664FA37256F9E /* FirebaseFirestore */; };
-		BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 531C40D33B3B99A388E7B82C /* FirebaseStorage */; };
 		C427DB57A47F820B4B9A11D9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 529BB5E7D1503AE8AE08149D /* AppEnvironment.swift */; };
 		D68B9984BB26CB4B4992A4A3 /* Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E329F91D0D4B014C3849EF5 /* Repositories.swift */; };
-		E5EF1EF19F3E06F668B4FA48 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = FD169FB567F235A78A78B6BC /* FirebaseAppCheck */; };
+		DAF1DE222F7A867B004883D0 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE212F7A867B004883D0 /* FirebaseAppCheck */; };
+		DAF1DE242F7A867B004883D0 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE232F7A867B004883D0 /* FirebaseAuth */; };
+		DAF1DE262F7A867B004883D0 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE252F7A867B004883D0 /* FirebaseCore */; };
+		DAF1DE282F7A867B004883D0 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE272F7A867B004883D0 /* FirebaseFirestore */; };
+		DAF1DE2A2F7A867B004883D0 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE292F7A867B004883D0 /* FirebaseFunctions */; };
+		DAF1DE2C2F7A867B004883D0 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = DAF1DE2B2F7A867B004883D0 /* FirebaseStorage */; };
 		EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */; };
 		F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */; };
 		F1653428046986CDF8C8705D /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6886502F638EEDCBDFCF2712 /* Services.swift */; };
-		F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E4083DDC571C6B8CCA46FABE /* FirebaseCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,12 +66,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				89390829B42DCA30992E0C92 /* FirebaseAuth in Frameworks */,
-				B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */,
-				3D336BC5A57A9ECD693B1984 /* FirebaseFunctions in Frameworks */,
-				BDCCF4CEB788300A63842E5F /* FirebaseStorage in Frameworks */,
-				F3B8EA371A2F08CD55688377 /* FirebaseCore in Frameworks */,
-				E5EF1EF19F3E06F668B4FA48 /* FirebaseAppCheck in Frameworks */,
+				DAF1DE222F7A867B004883D0 /* FirebaseAppCheck in Frameworks */,
+				DAF1DE282F7A867B004883D0 /* FirebaseFirestore in Frameworks */,
+				DAF1DE2A2F7A867B004883D0 /* FirebaseFunctions in Frameworks */,
+				DAF1DE262F7A867B004883D0 /* FirebaseCore in Frameworks */,
+				DAF1DE242F7A867B004883D0 /* FirebaseAuth in Frameworks */,
+				DAF1DE2C2F7A867B004883D0 /* FirebaseStorage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -204,12 +204,12 @@
 			);
 			name = TorpilleIOS;
 			packageProductDependencies = (
-				AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */,
-				DA78468648A664FA37256F9E /* FirebaseFirestore */,
-				E2E09631B134A550ACDC8D1A /* FirebaseFunctions */,
-				531C40D33B3B99A388E7B82C /* FirebaseStorage */,
-				E4083DDC571C6B8CCA46FABE /* FirebaseCore */,
-				FD169FB567F235A78A78B6BC /* FirebaseAppCheck */,
+				DAF1DE212F7A867B004883D0 /* FirebaseAppCheck */,
+				DAF1DE232F7A867B004883D0 /* FirebaseAuth */,
+				DAF1DE252F7A867B004883D0 /* FirebaseCore */,
+				DAF1DE272F7A867B004883D0 /* FirebaseFirestore */,
+				DAF1DE292F7A867B004883D0 /* FirebaseFunctions */,
+				DAF1DE2B2F7A867B004883D0 /* FirebaseStorage */,
 			);
 			productName = TorpilleIOS;
 			productReference = 4F1AFF34B6B98850646EEB64 /* TorpilleIOS.app */;
@@ -234,7 +234,7 @@
 			mainGroup = A566BC18BBD6DDBDFE6F5CE9;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2421BAF66EA5CFFA2AB5117A /* Products */;
@@ -352,11 +352,11 @@
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\"]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -440,11 +440,11 @@
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\", \"CFBundleTypeRole\": \"Editor\"]]";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -480,46 +480,46 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+		DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 11.10.0;
+				minimumVersion = 11.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		531C40D33B3B99A388E7B82C /* FirebaseStorage */ = {
+		DAF1DE212F7A867B004883D0 /* FirebaseAppCheck */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseStorage;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
 		};
-		AB01A3C4E7E271B1ECAE3EC1 /* FirebaseAuth */ = {
+		DAF1DE232F7A867B004883D0 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAuth;
 		};
-		DA78468648A664FA37256F9E /* FirebaseFirestore */ = {
+		DAF1DE252F7A867B004883D0 /* FirebaseCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseFirestore;
-		};
-		E2E09631B134A550ACDC8D1A /* FirebaseFunctions */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseFunctions;
-		};
-		E4083DDC571C6B8CCA46FABE /* FirebaseCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
 		};
-		FD169FB567F235A78A78B6BC /* FirebaseAppCheck */ = {
+		DAF1DE272F7A867B004883D0 /* FirebaseFirestore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B59F5B4287AF1C7DFEE3C5DE /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseAppCheck;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		DAF1DE292F7A867B004883D0 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		DAF1DE2B2F7A867B004883D0 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DAF1DE202F7A867B004883D0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

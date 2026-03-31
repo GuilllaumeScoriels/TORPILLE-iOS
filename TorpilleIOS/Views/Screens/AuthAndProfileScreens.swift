@@ -59,7 +59,12 @@ struct ProfileSetupScreen: View {
             Section("Ton profil") {
                 HStack {
                     Spacer()
-                    EmojiAvatarView(profileIcon: vm.selectedProfileIcon, size: 96)
+                    ProfileAvatarImageView(
+                        imageData: vm.selectedPhotoData,
+                        photoURL: nil,
+                        fallbackSymbol: "person.crop.circle.fill",
+                        size: 96
+                    )
                     Spacer()
                 }
 
@@ -70,7 +75,7 @@ struct ProfileSetupScreen: View {
                     }
                 }
 
-                ProfileIconPicker(selectedIcon: $vm.selectedProfileIcon)
+                ProfilePhotoPicker(selectedImageData: $vm.selectedPhotoData)
 
                 TextField("Pseudo", text: $vm.pseudo)
                     .textInputAutocapitalization(.never)

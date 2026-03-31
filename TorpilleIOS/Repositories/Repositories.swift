@@ -1,8 +1,31 @@
 import Foundation
+import UIKit
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
 import FirebaseStorage
+
+private func normalizedProfileImageData(from rawData: Data) -> Data? {
+    guard let image = UIImage(data: rawData) else {
+        return rawData
+    }
+
+    let maxDimension: CGFloat = 1_280
+    let originalSize = image.size
+    let longestSide = max(originalSize.width, originalSize.height)
+    let scale = longestSide > maxDimension ? maxDimension / longestSide : 1
+    let targetSize = CGSize(
+        width: max(1, originalSize.width * scale),
+        height: max(1, originalSize.height * scale)
+    )
+
+    let renderer = UIGraphicsImageRenderer(size: targetSize)
+    let rendered = renderer.image { _ in
+        image.draw(in: CGRect(origin: .zero, size: targetSize))
+    }
+
+    return rendered.jpegData(compressionQuality: 0.82)
+}
 
 private func debugDescribe(_ error: Error) -> String {
     let nsError = error as NSError
@@ -25,7 +48,7 @@ private func debugLog(_ label: String, _ error: Error) {
 final class AuthRepository {
     private let auth = Auth.auth()
 
-    var currentUID: String? { auth.currentUser?.uid }
+    var currentUID: String { auth.currentUser?.uid ?? "" }
     var currentEmail: String { auth.currentUser?.email ?? "" }
 
     func signUp(email: String, password: String) async throws {
@@ -86,7 +109,10 @@ final class UserRepository {
     }
 
     func getMeOrThrow() async throws -> UserProfile {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
         do {
             let snapshot = try await users.document(uid).getDocument()
             guard snapshot.exists else {
@@ -104,6 +130,7 @@ final class UserRepository {
             handler(nil)
             return nil
         }
+
         return users.document(uid).addSnapshotListener { snapshot, _ in
             guard let snapshot, snapshot.exists else {
                 handler(nil)
@@ -113,86 +140,131 @@ final class UserRepository {
         }
     }
 
+    func observeGlobalLeaderboard(limit: Int = 100, handler: @escaping ([UserProfile]) -> Void) -> ListenerRegistration {
+        users
+            .order(by: "xpTotal", descending: true)
+            .limit(to: limit)
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self else {
+                    handler([])
+                    return
+                }
+
+                let values = snapshot?.documents.map { document in
+                    self.decodeUserProfile(from: document, fallbackUID: document.documentID)
+                } ?? []
+
+                handler(values)
+            }
+    }
+
     func upsertProfile(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
         print("📍 UserRepository.upsertProfile")
         print("👤 uid =", uid)
         print("👤 pseudo =", pseudo)
         print("👤 photoURL =", photoURL ?? "nil")
         print("👤 profileIcon =", profileIcon ?? "nil")
+
         let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard clean.count >= 3, clean.count <= 20,
+        guard clean.count >= 3,
+              clean.count <= 20,
               clean.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }) else {
             throw TorpilleError.invalidPseudo
         }
 
         let pseudoKey = clean.normalizedPseudoKey
         let userRef = users.document(uid)
-        let pseudoRef = pseudos.document(pseudoKey)
         let currentEmail = auth.currentUser?.email?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Timestamp(date: Date())
+
+        let userSnapshot = try await userRef.getDocument()
+        let existingData = userSnapshot.data() ?? [:]
+        let currentKey = existingData["pseudoKey"] as? String ?? ""
+        let existingPhotoURL = existingData["photoUrl"] as? String
+        let existingProfileIcon = existingData["profileIcon"] as? String
+
+        let resolvedPhotoURL = photoURL?.isEmpty == false ? photoURL : existingPhotoURL
+
+        let resolvedProfileIcon: String?
+        if photoURL?.isEmpty == false {
+            resolvedProfileIcon = nil
+        } else {
+            resolvedProfileIcon = profileIcon?.isEmpty == false ? profileIcon : existingProfileIcon
+        }
+
+        var payload: [String: Any] = [
+            "uid": uid,
+            "pseudo": clean,
+            "pseudoKey": pseudoKey,
+            "updatedAt": now
+        ]
+
+        if let currentEmail, !currentEmail.isEmpty {
+            payload["email"] = currentEmail
+        }
+
+        if let resolvedPhotoURL, !resolvedPhotoURL.isEmpty {
+            payload["photoUrl"] = resolvedPhotoURL
+        } else {
+            payload["photoUrl"] = FieldValue.delete()
+        }
+
+        if let resolvedProfileIcon, !resolvedProfileIcon.isEmpty {
+            payload["profileIcon"] = resolvedProfileIcon
+        } else {
+            payload["profileIcon"] = FieldValue.delete()
+        }
+
+        if !userSnapshot.exists || currentKey.isEmpty || currentKey == pseudoKey {
+            do {
+                try await userRef.setData(payload, merge: true)
+                return
+            } catch {
+                debugLog("UserRepository.upsertProfile direct setData failed", error)
+                throw error
+            }
+        }
+
+        let pseudoRef = pseudos.document(pseudoKey)
 
         do {
             _ = try await db.runTransaction { transaction, errorPointer in
-            do {
-                let userSnapshot = try transaction.getDocument(userRef)
-                let pseudoSnapshot = try transaction.getDocument(pseudoRef)
-                let now = Timestamp(date: Date())
-                let currentKey = userSnapshot.data()?["pseudoKey"] as? String ?? ""
-                let existingPhotoURL = userSnapshot.data()?["photoUrl"] as? String
-                let existingProfileIcon = userSnapshot.data()?["profileIcon"] as? String
+                do {
+                    let pseudoSnapshot = try transaction.getDocument(pseudoRef)
 
-                if pseudoSnapshot.exists,
-                   let owner = pseudoSnapshot.data()?["uid"] as? String,
-                   owner != uid {
-                    let error = NSError(
-                        domain: "UserRepository",
-                        code: 409,
-                        userInfo: [NSLocalizedDescriptionKey: "Ce pseudo est déjà utilisé."]
-                    )
-                    errorPointer?.pointee = error
+                    if pseudoSnapshot.exists,
+                       let owner = pseudoSnapshot.data()?["uid"] as? String,
+                       owner != uid {
+                        let error = NSError(
+                            domain: "UserRepository",
+                            code: 409,
+                            userInfo: [NSLocalizedDescriptionKey: "Ce pseudo est déjà utilisé."]
+                        )
+                        errorPointer?.pointee = error
+                        return nil
+                    }
+
+                    if !pseudoSnapshot.exists {
+                        transaction.setData(
+                            [
+                                "uid": uid,
+                                "createdAt": now
+                            ],
+                            forDocument: pseudoRef
+                        )
+                    }
+
+                    transaction.setData(payload, forDocument: userRef, merge: true)
+                    transaction.deleteDocument(self.pseudos.document(currentKey))
+                    return nil
+                } catch {
+                    errorPointer?.pointee = error as NSError
                     return nil
                 }
-
-                transaction.setData([
-                    "uid": uid,
-                    "createdAt": now
-                ], forDocument: pseudoRef, merge: true)
-
-                let resolvedPhotoURL = photoURL?.isEmpty == false ? photoURL : existingPhotoURL
-                let resolvedProfileIcon = (profileIcon?.isEmpty == false ? profileIcon : existingProfileIcon) ?? "🍺"
-
-                var payload: [String: Any] = [
-                    "uid": uid,
-                    "pseudo": clean,
-                    "pseudoKey": pseudoKey,
-                    "updatedAt": now,
-                    "profileIcon": resolvedProfileIcon
-                ]
-
-                if let currentEmail, !currentEmail.isEmpty {
-                    payload["email"] = currentEmail
-                }
-
-                if let resolvedPhotoURL, !resolvedPhotoURL.isEmpty {
-                    payload["photoUrl"] = resolvedPhotoURL
-                } else {
-                    payload["photoUrl"] = FieldValue.delete()
-                }
-
-                if userSnapshot.data()?["createdAt"] == nil {
-                    payload["createdAt"] = now
-                }
-
-                transaction.setData(payload, forDocument: userRef, merge: true)
-
-                if !currentKey.isEmpty, currentKey != pseudoKey {
-                    transaction.deleteDocument(self.pseudos.document(currentKey))
-                }
-                return nil
-            } catch {
-                errorPointer?.pointee = error as NSError
-                return nil
-            }
             }
         } catch {
             debugLog("UserRepository.upsertProfile transaction failed", error)
@@ -209,12 +281,18 @@ final class UserRepository {
         print("👤 profileIcon =", profileIcon ?? "nil")
 
         var uploadedURL: String?
+
         if let imageData, let uid = auth.currentUser?.uid {
             print("🖼 image byteCount =", imageData.count)
-            let compressed = imageData
+            let compressed = normalizedProfileImageData(from: imageData) ?? imageData
             let filename = "profile_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+
             do {
-                let uploaded = try await transferService.uploadProfileImage(uid: uid, imageData: compressed, filename: filename)
+                let uploaded = try await transferService.uploadProfileImage(
+                    uid: uid,
+                    imageData: compressed,
+                    filename: filename
+                )
                 uploadedURL = uploaded.downloadURL
                 print("✅ uploadProfileImage ok bucket = \(uploaded.bucket) path = \(uploaded.storagePath)")
             } catch {
@@ -232,27 +310,42 @@ final class UserRepository {
         }
 
         do {
-            try await propagateProfileToCommunityMemberships()
+            try await propagateProfileToCommunityMemberships(
+                pseudo: pseudo,
+                photoURL: uploadedURL,
+                profileIcon: profileIcon
+            )
             print("✅ propagateProfileToCommunityMemberships ok")
         } catch {
             debugLog("UserRepository.updateProfile propagateProfileToCommunityMemberships failed", error)
-            throw error
         }
     }
 
-    private func propagateProfileToCommunityMemberships() async throws {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let me = try await getMeOrThrow()
+    private func propagateProfileToCommunityMemberships(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        let cleanPseudo = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let membershipSnapshot = try await db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .getDocuments()
 
         for document in membershipSnapshot.documents {
-            try await document.reference.setData([
-                "pseudo": me.pseudo,
-                "photoUrl": me.photoUrl as Any,
-                "profileIcon": me.profileIcon as Any
-            ], merge: true)
+            var payload: [String: Any] = [
+                "pseudo": cleanPseudo
+            ]
+
+            if let photoURL, !photoURL.isEmpty {
+                payload["photoUrl"] = photoURL
+                payload["profileIcon"] = FieldValue.delete()
+            } else if let profileIcon, !profileIcon.isEmpty {
+                payload["profileIcon"] = profileIcon
+                payload["photoUrl"] = FieldValue.delete()
+            }
+
+            try await document.reference.setData(payload, merge: true)
         }
     }
 }
@@ -262,13 +355,14 @@ final class CommunityRepository {
     private let db = Firestore.firestore()
     private let functions = Functions.functions(region: "europe-west1")
     private let videoTransfer = VideoTransferService()
-    
+
     private var communities: CollectionReference { db.collection("communities") }
-    
+    private var users: CollectionReference { db.collection("users") }
+
     func inviteLink(for communityId: String) -> String {
         "https://torpille-38783.web.app/join?cid=\(communityId)"
     }
-    
+
     func getCommunityOrThrow(_ communityId: String) async throws -> Community {
         let snapshot = try await communities.document(communityId).getDocument()
         guard snapshot.exists else {
@@ -276,7 +370,7 @@ final class CommunityRepository {
         }
         return try snapshot.data(as: Community.self)
     }
-    
+
     func createCommunity(name: String, isPublic: Bool, responseTimeSeconds: Int64, me: UserProfile) async throws -> String {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let doc = communities.document()
@@ -289,17 +383,17 @@ final class CommunityRepository {
             createdAt: Timestamp(date: Date())
         )
         try doc.setData(from: community)
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, profileIcon: me.profileIcon, xpInCommunity: 0)
+        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: nil, profileIcon: nil, xpInCommunity: 0)
         try doc.collection("members").document(uid).setData(from: member)
         return doc.documentID
     }
-    
+
     func joinCommunity(communityId: String, me: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: me.photoUrl, profileIcon: me.profileIcon, xpInCommunity: 0)
+        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: nil, profileIcon: nil, xpInCommunity: 0)
         try communities.document(communityId).collection("members").document(uid).setData(from: member, merge: true)
     }
-    
+
     func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let community = try await getCommunityOrThrow(communityId)
@@ -311,7 +405,7 @@ final class CommunityRepository {
             "responseTimeSeconds": responseTimeSeconds
         ])
     }
-    
+
     func observeCommunity(_ communityId: String, handler: @escaping (Community?) -> Void) -> ListenerRegistration {
         communities.document(communityId).addSnapshotListener { snapshot, _ in
             guard let snapshot, snapshot.exists else {
@@ -321,13 +415,13 @@ final class CommunityRepository {
             handler(try? snapshot.data(as: Community.self))
         }
     }
-    
+
     func observeCommunitiesForMe(handler: @escaping ([Community]) -> Void) -> ListenerRegistration? {
         guard let uid = auth.currentUser?.uid else {
             handler([])
             return nil
         }
-        
+
         return db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snapshot, _ in
@@ -346,28 +440,75 @@ final class CommunityRepository {
                 }
             }
     }
-    
+
     func myCommunityIds() async throws -> [String] {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        
+
         let snapshot = try await db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .getDocuments()
-        
+
         let ids = snapshot.documents.compactMap { $0.reference.parent.parent?.documentID }
         return Array(Set(ids)).sorted()
     }
-    
+
     func observeMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
         communities.document(communityId)
             .collection("members")
             .order(by: "xpInCommunity", descending: true)
-            .addSnapshotListener { snapshot, _ in
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self else {
+                    handler([])
+                    return
+                }
+
                 let values = snapshot?.documents.compactMap { try? $0.data(as: Member.self) } ?? []
-                handler(values)
+                Task {
+                    let enriched = await self.enrichMembersWithUserProfiles(values)
+                    handler(enriched)
+                }
             }
     }
-    
+
+    private func enrichMembersWithUserProfiles(_ members: [Member]) async -> [Member] {
+        guard !members.isEmpty else { return members }
+
+        let profilePairs = await withTaskGroup(of: (String, UserProfile?).self) { group in
+            for uid in Set(members.map(\.uid).filter { !$0.isEmpty }) {
+                group.addTask { [users = self.users] in
+                    let snapshot = try? await users.document(uid).getDocument()
+                    let profile = snapshot.flatMap { document -> UserProfile? in
+                        guard document.exists else { return nil }
+                        return try? document.data(as: UserProfile.self)
+                    }
+                    return (uid, profile)
+                }
+            }
+
+            var collected: [(String, UserProfile?)] = []
+            for await item in group {
+                collected.append(item)
+            }
+            return collected
+        }
+
+        let profilesByUID = Dictionary(uniqueKeysWithValues: profilePairs)
+
+        return members.map { member in
+            guard let profile = profilesByUID[member.uid] ?? nil else {
+                return member
+            }
+
+            var updatedMember = member
+            updatedMember.photoUrl = profile.photoUrl
+            updatedMember.profileIcon = profile.profileIcon
+            if !profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                updatedMember.pseudo = profile.pseudo
+            }
+            return updatedMember
+        }
+    }
+
     func observeMyMember(_ communityId: String, handler: @escaping (Member?) -> Void) -> ListenerRegistration? {
         guard let uid = auth.currentUser?.uid else {
             handler(nil)
@@ -376,15 +517,23 @@ final class CommunityRepository {
         return communities.document(communityId)
             .collection("members")
             .document(uid)
-            .addSnapshotListener { snapshot, _ in
-                guard let snapshot, snapshot.exists else {
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self else {
                     handler(nil)
                     return
                 }
-                handler(try? snapshot.data(as: Member.self))
+                guard let snapshot, snapshot.exists,
+                      let member = try? snapshot.data(as: Member.self) else {
+                    handler(nil)
+                    return
+                }
+                Task {
+                    let enriched = await self.enrichMembersWithUserProfiles([member]).first
+                    handler(enriched)
+                }
             }
     }
-    
+
     func observeMessages(_ communityId: String, handler: @escaping ([Message]) -> Void) -> ListenerRegistration {
         communities.document(communityId)
             .collection("messages")
@@ -399,7 +548,7 @@ final class CommunityRepository {
                 handler(values)
             }
     }
-    
+
     func sendText(communityId: String, senderPseudo: String, text: String) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         print("📍 CommunityRepository.sendText")
@@ -422,7 +571,7 @@ final class CommunityRepository {
             throw error
         }
     }
-    
+
     func sendAudioMessage(communityId: String, senderPseudo: String, localFileURL: URL, durationSeconds: Double) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
 
@@ -485,7 +634,7 @@ final class CommunityRepository {
             throw error
         }
     }
-    
+
     func getSignedPlaybackURL(videoPath: String, videoBucket: String?) async throws -> URL {
         try await videoTransfer.resolvePlaybackURL(videoPath: videoPath, videoBucket: videoBucket)
     }
@@ -493,7 +642,7 @@ final class CommunityRepository {
     func getStoragePlaybackURL(path: String, bucket: String?) async throws -> URL {
         try await videoTransfer.resolveStoragePlaybackURL(path: path, bucket: bucket)
     }
-    
+
     func sendVideoTorpille(
         communityId: String,
         senderPseudo: String,
@@ -701,11 +850,11 @@ final class CommunityRepository {
 
         do {
             try await communities.document(communityId).collection("messages").addDocument(data: [
-            "type": "text",
-            "senderUid": uid,
-            "senderPseudo": senderPseudo,
-            "text": "a répondu à une torpille et a relancé !",
-            "createdAt": now
+                "type": "text",
+                "senderUid": uid,
+                "senderPseudo": senderPseudo,
+                "text": "a répondu à une torpille et a relancé !",
+                "createdAt": now
             ])
             print("✅ respondWithVideo text message addDocument ok")
         } catch {
@@ -733,3 +882,4 @@ final class CommunityRepository {
         observeMembers(communityId, handler: handler)
     }
 }
+    

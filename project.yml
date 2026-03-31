@@ -29,7 +29,7 @@ targets:
           - https
           - torpille
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: L'application a besoin de la photothèque pour sélectionner une vidéo à envoyer.
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: L'application a besoin du micro pour enregistrer des messages vocaux.
         INFOPLIST_KEY_CFBundleURLTypes:
           - CFBundleTypeRole: Editor

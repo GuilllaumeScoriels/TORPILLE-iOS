@@ -35,6 +35,8 @@ struct AppRootView: View {
                         viewModel.route = .createCommunity
                     }, onOpenCommunity: {
                         viewModel.route = .community($0)
+                    }, onOpenGlobalLeaderboard: {
+                        viewModel.route = .globalLeaderboard
                     }, onSignOut: {
                         viewModel.route = .auth
                     })
@@ -52,6 +54,8 @@ struct AppRootView: View {
                     CommunityScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .home }, onOpenInfo: { viewModel.route = .communityInfo(communityId) })
                 case .communityInfo(let communityId):
                     CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) })
+                case .globalLeaderboard:
+                    GlobalLeaderboardScreen(env: viewModel.env)
                 }
             }
         }
@@ -65,14 +69,16 @@ struct MainTabView: View {
     let env: AppEnvironment
     let onCreateCommunity: () -> Void
     let onOpenCommunity: (String) -> Void
+    let onOpenGlobalLeaderboard: () -> Void
     let onSignOut: () -> Void
 
     @StateObject private var launchLocationSyncViewModel: LaunchLocationSyncViewModel
 
-    init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onSignOut: @escaping () -> Void) {
+    init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onOpenGlobalLeaderboard: @escaping () -> Void, onSignOut: @escaping () -> Void) {
         self.env = env
         self.onCreateCommunity = onCreateCommunity
         self.onOpenCommunity = onOpenCommunity
+        self.onOpenGlobalLeaderboard = onOpenGlobalLeaderboard
         self.onSignOut = onSignOut
         _launchLocationSyncViewModel = StateObject(
             wrappedValue: LaunchLocationSyncViewModel(
@@ -84,14 +90,17 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
-            HomeScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity, onSignOut: onSignOut)
+            HomeScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity, onOpenGlobalLeaderboard: onOpenGlobalLeaderboard, onSignOut: onSignOut)
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
 
             CommunitiesTabScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity)
                 .tabItem { Label("Communautés", systemImage: "person.3.fill") }
 
-            UserProfileScreen(env: env, onEditProfile: {}, onSignOut: onSignOut)
+            UserProfileScreen(env: env, onEditProfile: {}, onOpenGlobalLeaderboard: onOpenGlobalLeaderboard, onSignOut: onSignOut)
                 .tabItem { Label("Profil", systemImage: "person.fill") }
+
+            GlobalLeaderboardScreen(env: env)
+                .tabItem { Label("Classement", systemImage: "trophy.fill") }
 
             TorpilleursMapScreen(env: env)
                 .tabItem { Label("Carte", systemImage: "map.fill") }

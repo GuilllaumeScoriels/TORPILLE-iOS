@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ProfileIconLibrary {
     static let featuredIcons = [
@@ -124,5 +125,86 @@ struct EmojiAvatarView: View {
         }
         .frame(width: size, height: size)
         .overlay(Circle().stroke(Color.secondary.opacity(0.22), lineWidth: 1))
+    }
+}
+
+
+struct ProfileAvatarImageView: View {
+    let imageData: Data?
+    let photoURL: String?
+    let fallbackSymbol: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let imageData,
+               let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else if let photoURL,
+                      let url = URL(string: photoURL),
+                      !photoURL.isEmpty {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    placeholder
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.secondary.opacity(0.22), lineWidth: 1))
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle()
+                .fill(Color.secondary.opacity(0.12))
+            Image(systemName: fallbackSymbol)
+                .font(.system(size: size * 0.36, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct ProfilePhotoPicker: View {
+    @Binding var selectedImageData: Data?
+    @State private var selectedItem: PhotosPickerItem?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PhotosPicker(selection: $selectedItem, matching: .images) {
+                Label(selectedImageData == nil ? "Choisir une photo" : "Remplacer la photo", systemImage: "photo")
+            }
+            .buttonStyle(.borderedProminent)
+
+            if selectedImageData != nil {
+                Button(role: .destructive) {
+                    selectedItem = nil
+                    selectedImageData = nil
+                } label: {
+                    Label("Retirer la photo sélectionnée", systemImage: "trash")
+                }
+            }
+
+            Text("Formats recommandés : JPG ou PNG. La photo est envoyée dans Firebase Storage puis enregistrée dans le champ photoUrl du profil.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .task(id: selectedItem) {
+            guard let selectedItem else { return }
+            do {
+                if let data = try await selectedItem.loadTransferable(type: Data.self) {
+                    selectedImageData = data
+                }
+            } catch {
+                selectedImageData = nil
+            }
+        }
     }
 }

@@ -36,6 +36,7 @@ enum AppRoute: Equatable {
     case join(String)
     case community(String)
     case communityInfo(String)
+    case globalLeaderboard
 }
 
 @MainActor
@@ -208,8 +209,7 @@ final class ProfileViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var error: String?
     @Published var selectedPhotoData: Data?
-    @Published var selectedProfileIcon = "🍺"
-
+    
     private let repo: UserRepository
     private let authRepository: AuthRepository
 
@@ -228,7 +228,7 @@ final class ProfileViewModel: ObservableObject {
         Task {
             defer { isSaving = false }
             do {
-                try await repo.updateProfile(pseudo: pseudo, imageData: selectedPhotoData, profileIcon: selectedProfileIcon)
+                try await repo.updateProfile(pseudo: pseudo, imageData: selectedPhotoData, profileIcon: nil)
                 let me = try await repo.getMeOrThrow()
                 let trimmedPseudo = me.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedPseudo.isEmpty else {
@@ -277,16 +277,16 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
-    func saveProfile(pseudo: String, imageData: Data?, profileIcon: String?) {
+    func saveProfile(pseudo: String, imageData: Data?, profileIcon: String?) async -> Bool {
         error = nil
         infoMessage = nil
-        Task {
-            do {
-                try await userRepository.updateProfile(pseudo: pseudo, imageData: imageData, profileIcon: profileIcon)
-                infoMessage = "Profil mis à jour."
-            } catch {
-                self.error = debugErrorMessage(error)
-            }
+        do {
+            try await userRepository.updateProfile(pseudo: pseudo, imageData: imageData, profileIcon: profileIcon)
+            infoMessage = "Profil mis à jour."
+            return true
+        } catch {
+            self.error = debugErrorMessage(error)
+            return false
         }
     }
 
@@ -321,6 +321,145 @@ final class HomeViewModel: ObservableObject {
     deinit {
         meRegistration?.remove()
         communitiesRegistration?.remove()
+    }
+}
+
+@MainActor
+final class GlobalLeaderboardViewModel: ObservableObject {
+    @Published var players: [UserProfile] = []
+    @Published var availableCommunities: [Community] = []
+    @Published var selectedCommunityIds: Set<String> = []
+    @Published var currentUserId: String?
+
+    private let repo: UserRepository
+    private let authRepository: AuthRepository
+    private let communityRepository: CommunityRepository
+    private var leaderboardRegistration: ListenerRegistration?
+    private var communitiesRegistration: ListenerRegistration?
+    private var memberRegistrations: [String: ListenerRegistration] = [:]
+    private var allPlayers: [UserProfile] = []
+    private var memberUIDsByCommunity: [String: Set<String>] = [:]
+
+    init(repo: UserRepository, authRepository: AuthRepository, communityRepository: CommunityRepository) {
+        self.repo = repo
+        self.authRepository = authRepository
+        self.communityRepository = communityRepository
+        self.currentUserId = authRepository.currentUID
+    }
+
+    var hasActiveCommunityFilter: Bool {
+        !selectedCommunityIds.isEmpty
+    }
+
+    var filterDescription: String {
+        guard hasActiveCommunityFilter else {
+            return "Tous les utilisateurs de l'app"
+        }
+
+        let names = availableCommunities
+            .filter { selectedCommunityIds.contains($0.stableId) }
+            .map(\.name)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+        guard !names.isEmpty else {
+            return "Communautés sélectionnées"
+        }
+
+        return names.joined(separator: ", ")
+    }
+
+    func start() {
+        leaderboardRegistration?.remove()
+        communitiesRegistration?.remove()
+        removeMemberListeners()
+        memberUIDsByCommunity = [:]
+
+        currentUserId = authRepository.currentUID
+
+        leaderboardRegistration = repo.observeGlobalLeaderboard { [weak self] values in
+            DispatchQueue.main.async {
+                self?.allPlayers = values
+                self?.refreshPlayers()
+            }
+        }
+
+        communitiesRegistration = communityRepository.observeCommunitiesForMe { [weak self] values in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.availableCommunities = values
+                let validIds = Set(values.map(\.stableId))
+                self.selectedCommunityIds = self.selectedCommunityIds.intersection(validIds)
+                self.updateMemberListeners()
+                self.refreshPlayers()
+            }
+        }
+    }
+
+    func toggleCommunity(_ communityId: String) {
+        if selectedCommunityIds.contains(communityId) {
+            selectedCommunityIds.remove(communityId)
+        } else {
+            selectedCommunityIds.insert(communityId)
+        }
+        updateMemberListeners()
+        refreshPlayers()
+    }
+
+    func clearCommunityFilters() {
+        selectedCommunityIds.removeAll()
+        updateMemberListeners()
+        refreshPlayers()
+    }
+
+    private func updateMemberListeners() {
+        let desiredIds = selectedCommunityIds
+        let currentIds = Set(memberRegistrations.keys)
+
+        let idsToRemove = currentIds.subtracting(desiredIds)
+        for communityId in idsToRemove {
+            memberRegistrations[communityId]?.remove()
+            memberRegistrations.removeValue(forKey: communityId)
+            memberUIDsByCommunity.removeValue(forKey: communityId)
+        }
+
+        let idsToAdd = desiredIds.subtracting(currentIds)
+        for communityId in idsToAdd {
+            let registration = communityRepository.observeMembers(communityId) { [weak self] members in
+                DispatchQueue.main.async {
+                    self?.memberUIDsByCommunity[communityId] = Set(members.map(\.uid).filter { !$0.isEmpty })
+                    self?.refreshPlayers()
+                }
+            }
+            memberRegistrations[communityId] = registration
+        }
+    }
+
+    private func refreshPlayers() {
+        guard hasActiveCommunityFilter else {
+            players = allPlayers
+            return
+        }
+
+        let allowedUIDs = memberUIDsByCommunity.values.reduce(into: Set<String>()) { partialResult, value in
+            partialResult.formUnion(value)
+        }
+
+        players = allPlayers.filter { allowedUIDs.contains($0.uid) }
+    }
+
+    private func removeMemberListeners() {
+        for registration in memberRegistrations.values {
+            registration.remove()
+        }
+        memberRegistrations.removeAll()
+    }
+
+    deinit {
+        leaderboardRegistration?.remove()
+        communitiesRegistration?.remove()
+        for registration in memberRegistrations.values {
+            registration.remove()
+        }
     }
 }
 
