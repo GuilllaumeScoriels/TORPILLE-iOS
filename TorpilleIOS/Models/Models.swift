@@ -144,3 +144,40 @@ struct MapMemberAnnotation: Identifiable {
     let profileIcon: String?
     let lastTorpilleTimeText: String
 }
+
+
+enum CommunityNotificationMode: String, Codable, CaseIterable, Identifiable {
+    case all
+    case mentionsOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            return "Tout"
+        case .mentionsOnly:
+            return "Seulement moi"
+        }
+    }
+}
+
+struct CommunityNotificationPreference: Codable, Identifiable {
+    var communityId: String
+    var communityName: String
+    var mode: CommunityNotificationMode = .mentionsOnly
+    var updatedAt: Timestamp?
+
+    var id: String { communityId }
+}
+
+struct AppNotificationItem: Codable, Identifiable, Equatable {
+    var id: String
+    var communityId: String
+    var communityName: String
+    var title: String
+    var body: String
+    var createdAt: Date = Date()
+    var isRead: Bool = false
+    var deepLink: String = "notificationCenter"
+}

@@ -6,7 +6,7 @@
  Ce que fait ce fichier :
  - Liste les communautés de l'utilisateur.
  - Montre les membres géolocalisés sur une carte MapKit.
- - Permet de pousser la position courante de l'utilisateur vers Firestore.
+ - Affiche la dernière position connue synchronisée automatiquement au démarrage de l'application.
 
  Pourquoi c'est utile :
  - La version iOS reprend la fonctionnalité carte demandée par l'utilisateur.
@@ -21,9 +21,13 @@ struct TorpilleursMapScreen: View {
         center: CLLocationCoordinate2D(latitude: 50.8503, longitude: 4.3517),
         span: MKCoordinateSpan(latitudeDelta: 0.25, longitudeDelta: 0.25)
     )
+    @State private var selectedMember: MapMemberAnnotation?
+    @State private var selectedCommunityIdForTorpille = ""
+    @State private var torpilleFileURL: URL?
+    @State private var showCommunityChooser = false
 
     init(env: AppEnvironment) {
-        _vm = StateObject(wrappedValue: MapViewModel(repo: env.communityRepository, locationService: env.locationService))
+        _vm = StateObject(wrappedValue: MapViewModel(repo: env.communityRepository, userRepository: env.userRepository, locationService: env.locationService))
     }
 
     var body: some View {
@@ -33,11 +37,16 @@ struct TorpilleursMapScreen: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 12) {
-                    Text("Carte des torpilleurs")
-                        .font(.title2.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, topInset + 4)
-                        .padding(.horizontal)
+                    WelcomeHeroCard(
+                        title: "Carte des torpilleurs",
+                        subtitle: "Repère les membres actifs, filtre par communauté et envoie une torpille depuis la carte.",
+                        primarySymbol: "map.fill",
+                        secondarySymbol: "location.north.line.fill",
+                        cornerSymbol: "paperplane.fill",
+                        accent: .coral
+                    )
+                    .padding(.top, topInset + 4)
+                    .padding(.horizontal)
 
                     if vm.communities.isEmpty {
                         ContentUnavailableView("Aucune communauté", systemImage: "map", description: Text("Tu n'appartiens encore à aucune communauté."))
@@ -46,14 +55,19 @@ struct TorpilleursMapScreen: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
                                 ForEach(vm.communities, id: \.stableId) { community in
-                                    Button(community.name) {
+                                    Button {
                                         vm.selectCommunity(community.stableId)
                                         if let first = vm.annotations.first {
                                             region.center = CLLocationCoordinate2D(latitude: first.latitude, longitude: first.longitude)
                                         }
+                                    } label: {
+                                        CompactActionButton(
+                                            title: community.name,
+                                            systemImage: vm.selectedCommunityId == community.stableId ? "location.fill" : "location.circle.fill",
+                                            accent: vm.selectedCommunityId == community.stableId ? .ocean : .slate
+                                        )
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(vm.selectedCommunityId == community.stableId ? .blue : .gray)
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.horizontal)
@@ -72,17 +86,15 @@ struct TorpilleursMapScreen: View {
 
                         Map(coordinateRegion: $region, annotationItems: vm.annotations) { item in
                             MapAnnotation(coordinate: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)) {
-                                MapUserAnnotationView(item: item)
+                                MapUserAnnotationView(item: item) {
+                                    handleMemberTap(item)
+                                }
                             }
                         }
                         .frame(minHeight: 420)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .padding(.horizontal)
 
-                        Button("Mettre à jour ma position") {
-                            vm.refreshLocation()
-                        }
-                        .buttonStyle(.borderedProminent)
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Interprétation")
@@ -112,21 +124,117 @@ struct TorpilleursMapScreen: View {
                             .padding(.horizontal)
                     }
                 }
-                .padding(.bottom, bottomInset + 72)
+                .confirmationDialog(
+                    torpilleCommunityDialogTitle,
+                    isPresented: $showCommunityChooser,
+                    titleVisibility: .visible
+                ) {
+                    if let selectedMember {
+                        ForEach(sharedCommunitiesForSelectedMember, id: \.stableId) { community in
+                            Button("Torpiller dans \(community.name)") {
+                                selectedCommunityIdForTorpille = community.stableId
+                                torpilleFileURL = nil
+                            }
+                        }
+                    }
+
+                    Button("Annuler", role: .cancel) {
+                        resetTorpilleSelection()
+                    }
+                }
+                .sheet(isPresented: Binding(get: {
+                    selectedMember != nil && !selectedCommunityIdForTorpille.isEmpty
+                }, set: { isPresented in
+                    if !isPresented {
+                        resetTorpilleSelection()
+                    }
+                })) {
+                    CameraMediaPicker(selectedFileURL: $torpilleFileURL, allowedTypes: .videoOnly)
+                }
+                .onChange(of: torpilleFileURL) { _, newValue in
+                    guard let member = selectedMember, let newValue else { return }
+                    vm.sendVideoTorpille(fileURL: newValue, to: member, in: selectedCommunityIdForTorpille)
+                    resetTorpilleSelection()
+                }
+                .overlay {
+                    if vm.isSendingTorpille {
+                        ZStack {
+                            Color.black.opacity(0.15).ignoresSafeArea()
+                            ProgressView("Envoi de la torpille…")
+                                .padding()
+                                .background(.thinMaterial)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
+                    }
+                }
+                .padding(.bottom, bottomInset + 24)
+                .reserveMainTabBarSpace()
             }
             .onAppear {
                 vm.start()
-                vm.refreshLocation()
             }
         }
     }
 }
 
+private extension TorpilleursMapScreen {
+    var sharedCommunitiesForSelectedMember: [Community] {
+        guard let selectedMember else { return [] }
+        return vm.sharedCommunities(with: selectedMember.id)
+    }
+
+    var torpilleCommunityDialogTitle: String {
+        guard let selectedMember else {
+            return "Choisir une communauté"
+        }
+
+        let count = sharedCommunitiesForSelectedMember.count
+        if count <= 1 {
+            return "Torpiller @\(selectedMember.pseudo)"
+        }
+        return "Choisir où torpiller @\(selectedMember.pseudo)"
+    }
+
+    func handleMemberTap(_ member: MapMemberAnnotation) {
+        guard member.id != vm.currentUserId else { return }
+
+        selectedMember = member
+        let sharedCommunities = vm.sharedCommunities(with: member.id)
+
+        if let selectedCommunity = sharedCommunities.first(where: { $0.stableId == vm.selectedCommunityId }) {
+            if sharedCommunities.count == 1 {
+                selectedCommunityIdForTorpille = selectedCommunity.stableId
+            } else {
+                showCommunityChooser = true
+            }
+            return
+        }
+
+        if let onlyCommunity = sharedCommunities.first, sharedCommunities.count == 1 {
+            selectedCommunityIdForTorpille = onlyCommunity.stableId
+        } else if !sharedCommunities.isEmpty {
+            showCommunityChooser = true
+        } else {
+            vm.error = "Aucune communauté partagée avec @\(member.pseudo)."
+            resetTorpilleSelection()
+        }
+    }
+
+    func resetTorpilleSelection() {
+        selectedMember = nil
+        selectedCommunityIdForTorpille = ""
+        torpilleFileURL = nil
+        showCommunityChooser = false
+    }
+}
+
 private struct MapUserAnnotationView: View {
     let item: MapMemberAnnotation
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
+        Button(action: onTap) {
+            VStack(spacing: 6) {
             HStack(spacing: 6) {
                 MapAvatarView(photoUrl: item.photoUrl, profileIcon: item.profileIcon)
 
@@ -144,10 +252,13 @@ private struct MapUserAnnotationView: View {
                 .padding(.vertical, 4)
                 .background(.ultraThinMaterial)
                 .clipShape(Capsule())
+            }
         }
+        .buttonStyle(.plain)
         .shadow(radius: 3)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.pseudo), dernière torpille à \(item.lastTorpilleTimeText). \(item.subtitle)")
+        .accessibilityHint("Touchez pour envoyer une torpille à cet utilisateur.")
     }
 }
 

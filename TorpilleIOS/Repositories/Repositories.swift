@@ -90,7 +90,11 @@ final class UserRepository {
     private let transferService = VideoTransferService()
 
     private var users: CollectionReference { db.collection("users") }
+
+
     private var pseudos: CollectionReference { db.collection("pseudos") }
+
+
 
     private func decodeUserProfile(from snapshot: DocumentSnapshot, fallbackUID: String) -> UserProfile {
         let data = snapshot.data() ?? [:]
@@ -142,19 +146,26 @@ final class UserRepository {
 
     func observeGlobalLeaderboard(limit: Int = 100, handler: @escaping ([UserProfile]) -> Void) -> ListenerRegistration {
         users
-            .order(by: "xpTotal", descending: true)
-            .limit(to: limit)
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else {
                     handler([])
                     return
                 }
 
-                let values = snapshot?.documents.map { document in
+                let values = (snapshot?.documents.map { document in
                     self.decodeUserProfile(from: document, fallbackUID: document.documentID)
-                } ?? []
+                } ?? [])
+                .sorted { lhs, rhs in
+                    if lhs.xpTotal != rhs.xpTotal {
+                        return lhs.xpTotal > rhs.xpTotal
+                    }
 
-                handler(values)
+                    let leftName = lhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rightName = rhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+                }
+
+                handler(limit > 0 ? Array(values.prefix(limit)) : values)
             }
     }
 
@@ -196,10 +207,13 @@ final class UserRepository {
             resolvedProfileIcon = profileIcon?.isEmpty == false ? profileIcon : existingProfileIcon
         }
 
+        let existingXPTotal = (existingData["xpTotal"] as? Int64) ?? Int64(existingData["xpTotal"] as? Int ?? 0)
+
         var payload: [String: Any] = [
             "uid": uid,
             "pseudo": clean,
             "pseudoKey": pseudoKey,
+            "xpTotal": existingXPTotal,
             "updatedAt": now
         ]
 
@@ -360,6 +374,132 @@ final class CommunityRepository {
     private var communities: CollectionReference { db.collection("communities") }
     private var users: CollectionReference { db.collection("users") }
 
+
+    private func memberPayload(uid: String, pseudo: String, photoUrl: String?, profileIcon: String?, xpInCommunity: Int64) -> [String: Any] {
+        var payload: [String: Any] = [
+            "uid": uid,
+            "pseudo": pseudo,
+            "xpInCommunity": xpInCommunity
+        ]
+
+        if let photoUrl, !photoUrl.isEmpty {
+            payload["photoUrl"] = photoUrl
+        }
+
+        if let profileIcon, !profileIcon.isEmpty {
+            payload["profileIcon"] = profileIcon
+        }
+
+        return payload
+    }
+
+    private func asInt64(_ rawValue: Any?) -> Int64 {
+        if let value = rawValue as? Int64 { return value }
+        if let value = rawValue as? Int { return Int64(value) }
+        if let value = rawValue as? Double { return Int64(value) }
+        return 0
+    }
+
+    private func recalculateXP(for uid: String) async throws {
+        let memberships = try await db.collectionGroup("members")
+            .whereField("uid", isEqualTo: uid)
+            .getDocuments()
+
+        let totalXP = memberships.documents.reduce(Int64(0)) { partial, document in
+            partial + asInt64(document.data()["xpInCommunity"])
+        }
+
+        try await users.document(uid).setData([
+            "uid": uid,
+            "xpTotal": totalXP,
+            "updatedAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
+    private func recalculateXPForCurrentUser() async throws {
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        try await recalculateXP(for: uid)
+    }
+
+    @discardableResult
+    func syncXPState(communityId: String) async throws -> Bool {
+        let penaltyApplied = try await applyExpiredPenaltyIfNeeded(communityId: communityId)
+        try await recalculateXPForCurrentUser()
+        return penaltyApplied
+    }
+
+    @discardableResult
+    func syncCommunityXPState(communityId: String) async throws -> Int {
+        let penaltyApplied = try await applyExpiredPenaltyIfNeeded(communityId: communityId)
+        try await recalculateXPForCurrentUser()
+        return penaltyApplied ? 1 : 0
+    }
+
+    func syncMyTotalXP() async throws {
+        try await recalculateXPForCurrentUser()
+    }
+
+    @discardableResult
+    func applyExpiredPenaltyIfNeeded(communityId: String) async throws -> Bool {
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        let penaltyApplied = try await applyExpiredPenaltyIfNeeded(communityId: communityId, memberUid: uid)
+        if penaltyApplied {
+            try await recalculateXPForCurrentUser()
+        }
+        return penaltyApplied
+    }
+
+    @discardableResult
+    private func applyExpiredPenaltyIfNeeded(communityId: String, memberUid: String) async throws -> Bool {
+        let memberRef = communities.document(communityId).collection("members").document(memberUid)
+        let transactionResult = try await db.runTransaction { transaction, errorPointer in
+            do {
+                let memberSnapshot = try transaction.getDocument(memberRef)
+                guard memberSnapshot.exists else { return false }
+
+                let memberData = memberSnapshot.data() ?? [:]
+                guard let pendingTorpilleId = memberData["pendingTorpilleId"] as? String,
+                      !pendingTorpilleId.isEmpty,
+                      let pendingDeadlineAt = memberData["pendingDeadlineAt"] as? Timestamp else {
+                    return false
+                }
+
+                guard pendingDeadlineAt.dateValue() <= Date() else {
+                    return false
+                }
+
+                let torpRef = self.communities.document(communityId).collection("torpilles").document(pendingTorpilleId)
+                let torpSnapshot = try transaction.getDocument(torpRef)
+                guard torpSnapshot.exists else { return false }
+
+                let torpData = torpSnapshot.data() ?? [:]
+                if (torpData["responded"] as? Bool) == true { return false }
+                if (torpData["penaltyApplied"] as? Bool) == true { return false }
+
+                transaction.updateData([
+                    "penaltyApplied": true
+                ], forDocument: torpRef)
+
+                transaction.updateData([
+                    "xpInCommunity": FieldValue.increment(Int64(-10))
+                ], forDocument: memberRef)
+
+                return true
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return false
+            }
+        }
+
+        return (transactionResult as? Bool) ?? false
+    }
+
     func inviteLink(for communityId: String) -> String {
         "https://torpille-38783.web.app/join?cid=\(communityId)"
     }
@@ -371,6 +511,7 @@ final class CommunityRepository {
         }
         return try snapshot.data(as: Community.self)
     }
+
 
     func createCommunity(name: String, isPublic: Bool, responseTimeSeconds: Int64, me: UserProfile) async throws -> String {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
@@ -384,15 +525,31 @@ final class CommunityRepository {
             createdAt: Timestamp(date: Date())
         )
         try doc.setData(from: community)
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: nil, profileIcon: nil, xpInCommunity: 0)
-        try doc.collection("members").document(uid).setData(from: member)
+
+        let memberPayload = memberPayload(
+            uid: uid,
+            pseudo: me.pseudo,
+            photoUrl: me.photoUrl,
+            profileIcon: me.profileIcon,
+            xpInCommunity: 0
+        )
+        try await doc.collection("members").document(uid).setData(memberPayload)
+        try await recalculateXPForCurrentUser()
         return doc.documentID
     }
 
     func joinCommunity(communityId: String, me: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let member = Member(uid: uid, pseudo: me.pseudo, photoUrl: nil, profileIcon: nil, xpInCommunity: 0)
-        try communities.document(communityId).collection("members").document(uid).setData(from: member, merge: true)
+
+        let payload = memberPayload(
+            uid: uid,
+            pseudo: me.pseudo,
+            photoUrl: me.photoUrl,
+            profileIcon: me.profileIcon,
+            xpInCommunity: 0
+        )
+        try await communities.document(communityId).collection("members").document(uid).setData(payload, merge: true)
+        try await recalculateXPForCurrentUser()
     }
 
     func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64) async throws {
@@ -456,14 +613,23 @@ final class CommunityRepository {
     func observeMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
         communities.document(communityId)
             .collection("members")
-            .order(by: "xpInCommunity", descending: true)
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else {
                     handler([])
                     return
                 }
 
-                let values = snapshot?.documents.compactMap { try? $0.data(as: Member.self) } ?? []
+                let values = (snapshot?.documents.compactMap { try? $0.data(as: Member.self) } ?? [])
+                    .sorted { lhs, rhs in
+                        if lhs.xpInCommunity != rhs.xpInCommunity {
+                            return lhs.xpInCommunity > rhs.xpInCommunity
+                        }
+
+                        let leftName = lhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let rightName = rhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+                    }
+
                 Task {
                     let enriched = await self.enrichMembersWithUserProfiles(values)
                     handler(enriched)
@@ -707,7 +873,7 @@ final class CommunityRepository {
         communityId: String,
         senderPseudo: String,
         localFileURL: URL,
-        taggedUid: String,
+        taggedUid: String?,
         taggedPseudo: String,
         tagX: Double,
         tagY: Double
@@ -772,20 +938,24 @@ final class CommunityRepository {
 
         let batch = db.batch()
 
-        try batch.setData(from: Torpille(
-            id: torpDoc.documentID,
-            fromUid: uid,
-            toUid: taggedUid,
-            communityId: communityId,
-            videoBucket: uploaded.bucket,
-            videoPath: uploaded.storagePath,
-            taggedPseudo: taggedPseudo,
-            tagX: tagX,
-            tagY: tagY,
-            createdAt: createdAt,
-            deadlineAt: deadlineAt,
-            responded: false
-        ), forDocument: torpDoc)
+        let cleanTaggedPseudo = taggedPseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTaggedUid = taggedUid?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasIdentifiedTarget = !(resolvedTaggedUid ?? "").isEmpty
+
+        batch.setData([
+            "id": torpDoc.documentID,
+            "fromUid": uid,
+            "toUid": resolvedTaggedUid ?? "",
+            "communityId": communityId,
+            "videoBucket": uploaded.bucket,
+            "videoPath": uploaded.storagePath,
+            "taggedPseudo": cleanTaggedPseudo,
+            "tagX": tagX,
+            "tagY": tagY,
+            "createdAt": createdAt,
+            "deadlineAt": deadlineAt,
+            "responded": false
+        ], forDocument: torpDoc)
 
         try batch.setData(from: Message(
             id: msgDoc.documentID,
@@ -803,31 +973,34 @@ final class CommunityRepository {
             imageUrl: nil,
             imageBucket: nil,
             imagePath: nil,
-            taggedUid: taggedUid,
-            taggedPseudo: taggedPseudo,
+            taggedUid: hasIdentifiedTarget ? resolvedTaggedUid : nil,
+            taggedPseudo: cleanTaggedPseudo,
             tagX: tagX,
             tagY: tagY,
             torpilleId: torpDoc.documentID,
             createdAt: createdAt
         ), forDocument: msgDoc)
 
-        batch.setData([
-            "pendingTorpilleId": torpDoc.documentID,
-            "pendingDeadlineAt": deadlineAt,
-            "pendingFromPseudo": senderPseudo,
-            "lastTorpilledAt": createdAt
-        ], forDocument: communities.document(communityId).collection("members").document(taggedUid), merge: true)
+        if hasIdentifiedTarget, let resolvedTaggedUid {
+            batch.setData([
+                "pendingTorpilleId": torpDoc.documentID,
+                "pendingDeadlineAt": deadlineAt,
+                "pendingFromPseudo": senderPseudo,
+                "lastTorpilledAt": createdAt
+            ], forDocument: communities.document(communityId).collection("members").document(resolvedTaggedUid), merge: true)
+        }
 
         batch.setData([
             "uid": uid,
             "pseudo": senderPseudo,
-            "xpInCommunity": FieldValue.increment(Int64(10))
+            "xpInCommunity": FieldValue.increment(Int64(20))
         ], forDocument: communities.document(communityId).collection("members").document(uid), merge: true)
 
         print("📍 3. batch.commit")
         do {
             try await batch.commit()
             print("✅ batch.commit ok")
+            try await recalculateXPForCurrentUser()
         } catch {
             let nsError = error as NSError
             print("🔥 batch.commit failed")
@@ -837,23 +1010,26 @@ final class CommunityRepository {
             throw error
         }
 
-        print("📍 4. sendTorpilleNotification")
-        do {
-            _ = try await functions.httpsCallable("sendTorpilleNotification").call([
-                "toUid": taggedUid,
-                "fromPseudo": senderPseudo,
-                "communityName": community.name,
-                "communityId": communityId
-            ])
-            print("✅ sendTorpilleNotification ok")
-        } catch {
-            let nsError = error as NSError
-            print("⚠️ sendTorpilleNotification failed but torpille already saved")
-            print("domain =", nsError.domain)
-            print("code =", nsError.code)
-            print("userInfo =", nsError.userInfo)
+        if hasIdentifiedTarget, let resolvedTaggedUid {
+            print("📍 4. sendTorpilleNotification")
+            do {
+                _ = try await functions.httpsCallable("sendTorpilleNotification").call([
+                    "toUid": resolvedTaggedUid,
+                    "fromPseudo": senderPseudo,
+                    "communityName": community.name,
+                    "communityId": communityId
+                ])
+                print("✅ sendTorpilleNotification ok")
+            } catch {
+                let nsError = error as NSError
+                print("⚠️ sendTorpilleNotification failed but torpille already saved")
+                print("domain =", nsError.domain)
+                print("code =", nsError.code)
+                print("userInfo =", nsError.userInfo)
+            }
         }
     }
+
 
     func respondWithVideo(
         communityId: String,
@@ -866,6 +1042,8 @@ final class CommunityRepository {
         tagY: Double
     ) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        _ = try await applyExpiredPenaltyIfNeeded(communityId: communityId)
+
         let torpRef = communities.document(communityId).collection("torpilles").document(pendingTorpilleId)
         let torpSnapshot = try await torpRef.getDocument()
         guard torpSnapshot.exists else {
@@ -880,6 +1058,9 @@ final class CommunityRepository {
         print("🎥 response localFileURL =", localFileURL.path)
         print("🎥 response file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
         let now = Timestamp(date: Date())
+        let isLateResponse = (torp.deadlineAt?.dateValue() ?? .distantFuture) < now.dateValue()
+        let recoveryXP: Int64 = isLateResponse ? 5 : 0
+
         let batch = db.batch()
         batch.updateData([
             "responded": true,
@@ -891,11 +1072,12 @@ final class CommunityRepository {
             "pendingDeadlineAt": FieldValue.delete(),
             "pendingFromPseudo": FieldValue.delete(),
             "lastRespondedAt": now,
-            "xpInCommunity": FieldValue.increment(Int64(15))
+            "xpInCommunity": FieldValue.increment(recoveryXP)
         ], forDocument: communities.document(communityId).collection("members").document(uid))
         do {
             try await batch.commit()
             print("✅ respondWithVideo pre-batch commit ok")
+            try await recalculateXPForCurrentUser()
         } catch {
             debugLog("CommunityRepository.respondWithVideo pre-batch commit failed", error)
             throw error
@@ -916,7 +1098,7 @@ final class CommunityRepository {
                 "type": "text",
                 "senderUid": uid,
                 "senderPseudo": senderPseudo,
-                "text": "a répondu à une torpille et a relancé !",
+                "text": isLateResponse ? "a répondu en retard à une torpille et a relancé !" : "a répondu à une torpille et a relancé !",
                 "createdAt": now
             ])
             print("✅ respondWithVideo text message addDocument ok")

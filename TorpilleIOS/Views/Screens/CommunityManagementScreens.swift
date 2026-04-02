@@ -23,23 +23,69 @@ struct CreateCommunityScreen: View {
     }
 
     var body: some View {
-        Form {
-            Section("Nouvelle communauté") {
-                TextField("Nom", text: $vm.name)
-                TextField("Temps de réponse (secondes)", text: $vm.responseTime)
-                    .keyboardType(.numberPad)
-                Toggle("Communauté publique", isOn: $vm.isPublic)
-                Button(vm.isLoading ? "Création…" : "Créer") {
-                    vm.create(onCreated: onCreated)
-                }
-                .disabled(vm.isLoading || vm.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Retour", action: onBack)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                WelcomeHeroCard(
+                    title: "Nouvelle communauté",
+                    subtitle: "Crée un espace accueillant, règle son tempo et invite tes joueurs.",
+                    primarySymbol: "person.3.fill",
+                    secondarySymbol: "flag.checkered.2.crossed",
+                    cornerSymbol: "plus.circle.fill",
+                    accent: .sunset
+                )
 
-            if let error = vm.error {
-                Section { Text(error).foregroundStyle(.red) }
+                VStack(alignment: .leading, spacing: 14) {
+                    TextField("Nom", text: $vm.name)
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                    TextField("Temps de réponse (secondes)", text: $vm.responseTime)
+                        .keyboardType(.numberPad)
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                    Toggle("Communauté publique", isOn: $vm.isPublic)
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .padding(18)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+
+                Button {
+                    vm.create(onCreated: onCreated)
+                } label: {
+                    IllustratedActionButton(
+                        title: vm.isLoading ? "Création…" : "Créer",
+                        subtitle: "Valide les paramètres et ouvre la communauté.",
+                        systemImage: "plus.circle.fill",
+                        illustrationSymbol: "person.3.sequence.fill",
+                        accent: .meadow
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.isLoading || vm.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button(action: onBack) {
+                    CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .slate)
+                }
+                .buttonStyle(.plain)
+
+                if let error = vm.error {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
+            .padding()
         }
+        .background(Color(.systemBackground))
         .navigationTitle("Créer")
     }
 }
@@ -58,14 +104,31 @@ struct JoinCommunityScreen: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Invitation communauté")
-                .font(.title2)
+        VStack(spacing: 18) {
+            WelcomeHeroCard(
+                title: "Invitation communauté",
+                subtitle: "Patiente un instant pendant que Torpille vérifie ton invitation.",
+                primarySymbol: "envelope.open.fill",
+                secondarySymbol: "person.2.badge.plus",
+                cornerSymbol: "checkmark.circle.fill",
+                accent: .ocean
+            )
+
             if vm.loading { ProgressView() }
+
             if let error = vm.error {
-                Text(error).foregroundStyle(.red)
+                Text(error)
+                    .foregroundStyle(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            Button("Retour", action: onCancel)
+
+            Button(action: onCancel) {
+                CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .coral)
+            }
+            .buttonStyle(.plain)
         }
         .padding()
         .task {
@@ -88,9 +151,14 @@ struct CommunityInfoScreen: View {
     var body: some View {
         List {
             Section {
-                Button("Retour", action: onBack)
+                Button(action: onBack) {
+                    CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .slate)
+                }
+                .buttonStyle(.plain)
+
                 Text(vm.community?.name ?? "Communauté")
-                    .font(.title2)
+                    .font(.title2.weight(.bold))
+
                 if let community = vm.community {
                     Text("Invitation : https://torpille-38783.web.app/join?cid=\(community.stableId)")
                         .font(.footnote)
@@ -106,9 +174,12 @@ struct CommunityInfoScreen: View {
                     Toggle("Communauté publique", isOn: $vm.isPublic)
                     TextField("Temps de réponse", text: $vm.responseTime)
                         .keyboardType(.numberPad)
-                    Button("Enregistrer") {
+                    Button {
                         vm.saveSettings(communityId: communityId)
+                    } label: {
+                        CompactActionButton(title: "Enregistrer", systemImage: "square.and.arrow.down.fill", accent: .meadow)
                     }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -122,6 +193,7 @@ struct CommunityInfoScreen: View {
                             .font(.caption)
                             .foregroundStyle(member.pendingTorpilleId == nil ? .green : .orange)
                     }
+                    .padding(.vertical, 4)
                 }
             }
 

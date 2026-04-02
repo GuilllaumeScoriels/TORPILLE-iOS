@@ -33,6 +33,7 @@
 		EE76FC4CDBC1D94DAD74D9DA /* TorpilleursMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */; };
 		F12240BDC5EEA6B343059F4F /* VideoPlayerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA211DC0CEF2961AE78131A /* VideoPlayerSheet.swift */; };
 		F1653428046986CDF8C8705D /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6886502F638EEDCBDFCF2712 /* Services.swift */; };
+		FA11C0DE1234567890ABCDEF /* FriendlyActionComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11C0DE1234567890ABCDE0 /* FriendlyActionComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +60,7 @@
 		BC7BC58FBFE6F6A4C48C5CB5 /* TorpilleursMapScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleursMapScreen.swift; sourceTree = "<group>"; };
 		C3CDE4B57F9F155C293EE67E /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		F9D4E14DD9EE6900001E62DF /* TorpilleIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TorpilleIOSApp.swift; sourceTree = "<group>"; };
+		FA11C0DE1234567890ABCDE0 /* FriendlyActionComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendlyActionComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,6 +154,7 @@
 		8B508089A8CF92DB38AF26A5 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				FA11C0DE1234567890ABCDE0 /* FriendlyActionComponents.swift */,
 				761F9F5757429B664D4B31EB /* ProfileIconPicker.swift */,
 				2CC96E05817DAD4955BE79B0 /* VideoMessageRow.swift */,
 				5DF176BAB4201AA09DAF0E28 /* VideoPicker.swift */,
@@ -269,6 +272,7 @@
 				191377AD30C0FBAD816714D0 /* CommunityManagementScreens.swift in Sources */,
 				92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */,
 				438F922D1D7CA3030F54AC8F /* Extensions.swift in Sources */,
+				FA11C0DE1234567890ABCDEF /* FriendlyActionComponents.swift in Sources */,
 				1119E14976977C426AE9BB37 /* HomeAndProfileScreens.swift in Sources */,
 				8BC2597AE67620D04F9412FA /* Models.swift in Sources */,
 				2CCE84494D7500292027782C /* ProfileIconPicker.swift in Sources */,

@@ -12,16 +12,19 @@
  - Simplifie le portage depuis l'architecture Android orientée repositories/viewmodels.
 
  Note de correction :
- - Cette classe reste volontairement non isolée par acteur.
- - Cela évite les erreurs de compilation Swift Concurrency lors de la création
-   de l'environnement au démarrage et lors de son injection dans les vues.
+ - Cet environnement est isolé sur le MainActor car il expose aussi
+   `NotificationCenterService`, lui-même annoté `@MainActor`.
+ - Cela supprime l'erreur Swift Concurrency liée à l'initialisation paresseuse
+   du service de notifications depuis un contexte non isolé.
  */
 
 import Foundation
 
+@MainActor
 final class AppEnvironment {
     lazy var authRepository = AuthRepository()
     lazy var userRepository = UserRepository()
     lazy var communityRepository = CommunityRepository()
     lazy var locationService = LocationService()
+    lazy var notificationCenterService = NotificationCenterService(communityRepository: communityRepository)
 }

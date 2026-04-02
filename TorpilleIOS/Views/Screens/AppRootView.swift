@@ -11,7 +11,19 @@
 import SwiftUI
 
 struct AppRootView: View {
-    @StateObject var viewModel: AppRootViewModel
+    @StateObject private var viewModel: AppRootViewModel
+    @StateObject private var launchLocationSyncViewModel: LaunchLocationSyncViewModel
+
+    init(viewModel: AppRootViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+        _launchLocationSyncViewModel = StateObject(
+            wrappedValue: LaunchLocationSyncViewModel(
+                authRepository: viewModel.env.authRepository,
+                repo: viewModel.env.communityRepository,
+                locationService: viewModel.env.locationService
+            )
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,9 +47,10 @@ struct AppRootView: View {
                         viewModel.route = .createCommunity
                     }, onOpenCommunity: {
                         viewModel.route = .community($0)
-                    }, onOpenGlobalLeaderboard: {
-                        viewModel.route = .globalLeaderboard
+                    }, onOpenNotificationCenter: {
+                        viewModel.openNotificationCenter()
                     }, onSignOut: {
+                        viewModel.env.notificationCenterService.stop()
                         viewModel.route = .auth
                     })
                 case .createCommunity:
@@ -56,11 +69,21 @@ struct AppRootView: View {
                     CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) })
                 case .globalLeaderboard:
                     GlobalLeaderboardScreen(env: viewModel.env)
+                case .notificationCenter:
+                    NotificationCenterScreen(env: viewModel.env, onBack: { viewModel.route = .home })
                 }
             }
         }
         .onOpenURL { url in
             viewModel.handleIncomingURL(url)
+        }
+        .task {
+            await launchLocationSyncViewModel.syncOnAppOpenIfNeeded()
+        }
+        .onReceive(viewModel.env.notificationCenterService.$navigationTarget) { target in
+            guard target == "notificationCenter" else { return }
+            viewModel.env.notificationCenterService.navigationTarget = nil
+            viewModel.openNotificationCenter()
         }
     }
 }
@@ -69,44 +92,48 @@ struct MainTabView: View {
     let env: AppEnvironment
     let onCreateCommunity: () -> Void
     let onOpenCommunity: (String) -> Void
-    let onOpenGlobalLeaderboard: () -> Void
+    let onOpenNotificationCenter: () -> Void
     let onSignOut: () -> Void
+    @State private var selectedTab = 0
 
-    @StateObject private var launchLocationSyncViewModel: LaunchLocationSyncViewModel
-
-    init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onOpenGlobalLeaderboard: @escaping () -> Void, onSignOut: @escaping () -> Void) {
+    init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onOpenNotificationCenter: @escaping () -> Void, onSignOut: @escaping () -> Void) {
         self.env = env
         self.onCreateCommunity = onCreateCommunity
         self.onOpenCommunity = onOpenCommunity
-        self.onOpenGlobalLeaderboard = onOpenGlobalLeaderboard
+        self.onOpenNotificationCenter = onOpenNotificationCenter
         self.onSignOut = onSignOut
-        _launchLocationSyncViewModel = StateObject(
-            wrappedValue: LaunchLocationSyncViewModel(
-                repo: env.communityRepository,
-                locationService: env.locationService
-            )
-        )
     }
 
     var body: some View {
-        TabView {
-            HomeScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity, onOpenGlobalLeaderboard: onOpenGlobalLeaderboard, onSignOut: onSignOut)
+        TabView(selection: $selectedTab) {
+            HomeScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity, onOpenProfile: {
+                selectedTab = 2
+            }, onOpenNotificationCenter: onOpenNotificationCenter, onOpenGlobalLeaderboard: {
+                selectedTab = 3
+            }, onSignOut: onSignOut)
                 .tabItem { Label("Accueil", systemImage: "house.fill") }
+                .tag(0)
 
             CommunitiesTabScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity)
                 .tabItem { Label("Communautés", systemImage: "person.3.fill") }
+                .tag(1)
 
-            UserProfileScreen(env: env, onEditProfile: {}, onOpenGlobalLeaderboard: onOpenGlobalLeaderboard, onSignOut: onSignOut)
+            UserProfileScreen(env: env, onEditProfile: {}, onOpenGlobalLeaderboard: {
+                selectedTab = 3
+            }, onSignOut: onSignOut)
                 .tabItem { Label("Profil", systemImage: "person.fill") }
+                .tag(2)
 
             GlobalLeaderboardScreen(env: env)
                 .tabItem { Label("Classement", systemImage: "trophy.fill") }
+                .tag(3)
 
             TorpilleursMapScreen(env: env)
                 .tabItem { Label("Carte", systemImage: "map.fill") }
+                .tag(4)
         }
-        .task {
-            await launchLocationSyncViewModel.syncOnAppOpenIfNeeded()
-        }
+        .toolbarBackground(Color.white, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarColorScheme(.light, for: .tabBar)
     }
 }

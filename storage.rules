@@ -1,0 +1,72 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCommunityAdmin(communityId) {
+      return isSignedIn()
+        && exists(/databases/(default)/documents/communities/$(communityId))
+        && get(/databases/(default)/documents/communities/$(communityId)).data.adminUid == request.auth.uid;
+    }
+
+    function isCommunityMember(communityId) {
+      return isSignedIn()
+        && exists(/databases/(default)/documents/communities/$(communityId)/members/$(request.auth.uid));
+    }
+
+    function canAccessCommunityMedia(communityId) {
+      return isCommunityAdmin(communityId) || isCommunityMember(communityId);
+    }
+
+    function isImageUpload() {
+      return request.resource != null
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function isVideoUpload() {
+      return request.resource != null
+        && request.resource.contentType.matches('video/.*');
+    }
+
+    function isAudioUpload() {
+      return request.resource != null
+        && request.resource.contentType.matches('audio/.*');
+    }
+
+    match /users/{uid}/profile/{fileName=**} {
+      allow read: if true;
+
+      allow write: if isSignedIn()
+        && request.auth.uid == uid
+        && isImageUpload()
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /communities/{communityId}/images/{fileName=**} {
+      allow read: if canAccessCommunityMedia(communityId);
+
+      allow write: if canAccessCommunityMedia(communityId)
+        && isImageUpload()
+        && request.resource.size < 15 * 1024 * 1024;
+    }
+
+    match /communities/{communityId}/videos/{fileName=**} {
+      allow read: if canAccessCommunityMedia(communityId);
+
+      allow write: if canAccessCommunityMedia(communityId)
+        && isVideoUpload()
+        && request.resource.size < 200 * 1024 * 1024;
+    }
+
+    match /communities/{communityId}/audios/{fileName=**} {
+      allow read: if canAccessCommunityMedia(communityId);
+
+      allow write: if canAccessCommunityMedia(communityId)
+        && isAudioUpload()
+        && request.resource.size < 30 * 1024 * 1024;
+    }
+  }
+}

@@ -1,0 +1,379 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUid() {
+      return request.auth.uid;
+    }
+
+    function myProfilePath() {
+      return /databases/$(database)/documents/users/$(myUid());
+    }
+
+    function myProfileExists() {
+      return isSignedIn() && exists(myProfilePath());
+    }
+
+    function myProfile() {
+      return get(myProfilePath()).data;
+    }
+
+    function myPseudoKeyOrNull() {
+      return myProfileExists()
+        && ("pseudoKey" in myProfile())
+        && (myProfile().pseudoKey is string)
+        && myProfile().pseudoKey.size() > 0
+        ? myProfile().pseudoKey
+        : null;
+    }
+
+    function communityPath(communityId) {
+      return /databases/$(database)/documents/communities/$(communityId);
+    }
+
+    function communityExists(communityId) {
+      return exists(communityPath(communityId));
+    }
+
+    function communityDoc(communityId) {
+      return get(communityPath(communityId));
+    }
+
+    function isCommunityAdmin(communityId) {
+      return isSignedIn()
+        && communityExists(communityId)
+        && myUid() == communityDoc(communityId).data.adminUid;
+    }
+
+    function isCommunityPublic(communityId) {
+      return communityExists(communityId)
+        && (
+          !("isPublic" in communityDoc(communityId).data)
+          || communityDoc(communityId).data.isPublic == true
+        );
+    }
+
+    function isInAllowlist(communityId) {
+      let pk = myPseudoKeyOrNull();
+      return pk != null
+        && exists(/databases/$(database)/documents/communities/$(communityId)/allowlist/$(pk));
+    }
+
+    function isMember(communityId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(myUid()));
+    }
+
+    function isCommunityParticipant(communityId) {
+      return isCommunityAdmin(communityId) || isMember(communityId);
+    }
+
+    function isStringOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is string;
+    }
+
+    function isNumberOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is number;
+    }
+
+    function isBoolOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is bool;
+    }
+
+    function memberSystemEditableKeys() {
+      return [
+        "pendingTorpilleId",
+        "pendingDeadlineAt",
+        "pendingFromPseudo",
+        "lastTorpilledAt",
+        "lastSeenTorpilleAt",
+        "uid",
+        "pseudo",
+        "xpInCommunity",
+        "photoUrl",
+        "profileIcon",
+        "lastRespondedAt",
+        "lastLatitude",
+        "lastLongitude",
+        "lastLocationUpdatedAt",
+        "overdueCount"
+      ];
+    }
+
+    function torpilleEditableKeys() {
+      return [
+        "id",
+        "fromUid",
+        "toUid",
+        "communityId",
+        "videoBucket",
+        "videoPath",
+        "videoUrl",
+        "taggedPseudo",
+        "tagX",
+        "tagY",
+        "createdAt",
+        "deadlineAt",
+        "responded",
+        "respondedAt",
+        "nextToUid",
+        "penaltyApplied"
+      ];
+    }
+
+    function isValidUserCreate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "pseudo",
+          "pseudoKey",
+          "profileIcon",
+          "photoUrl",
+          "xpTotal",
+          "fcmToken",
+          "createdAt",
+          "updatedAt",
+          "lastLatitude",
+          "lastLongitude",
+          "lastLocationUpdatedAt"
+        ])
+        && request.resource.data.uid is string
+        && isStringOrNull("email")
+        && isStringOrNull("pseudo")
+        && isStringOrNull("pseudoKey")
+        && isStringOrNull("profileIcon")
+        && isStringOrNull("photoUrl")
+        && isStringOrNull("fcmToken")
+        && isNumberOrNull("xpTotal")
+        && isNumberOrNull("lastLatitude")
+        && isNumberOrNull("lastLongitude");
+    }
+
+    function isValidUserUpdate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "pseudo",
+          "pseudoKey",
+          "profileIcon",
+          "photoUrl",
+          "xpTotal",
+          "fcmToken",
+          "createdAt",
+          "updatedAt",
+          "lastLatitude",
+          "lastLongitude",
+          "lastLocationUpdatedAt"
+        ])
+        && isStringOrNull("email")
+        && isStringOrNull("pseudo")
+        && isStringOrNull("pseudoKey")
+        && isStringOrNull("profileIcon")
+        && isStringOrNull("photoUrl")
+        && isStringOrNull("fcmToken")
+        && isNumberOrNull("xpTotal")
+        && isNumberOrNull("lastLatitude")
+        && isNumberOrNull("lastLongitude");
+    }
+
+    function isValidMessageCreate(communityId) {
+      return isSignedIn()
+        && isCommunityParticipant(communityId)
+        && request.resource.data.senderUid == myUid()
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "type",
+          "senderUid",
+          "senderPseudo",
+          "text",
+          "imageUrl",
+          "imageBucket",
+          "imagePath",
+          "videoUrl",
+          "videoBucket",
+          "videoPath",
+          "audioUrl",
+          "audioBucket",
+          "audioPath",
+          "audioDurationSeconds",
+          "taggedUid",
+          "taggedPseudo",
+          "tagX",
+          "tagY",
+          "torpilleId",
+          "createdAt"
+        ])
+        && request.resource.data.type in ["text", "image", "video", "audio"]
+        && isStringOrNull("id")
+        && isStringOrNull("senderPseudo")
+        && isStringOrNull("text")
+        && isStringOrNull("imageUrl")
+        && isStringOrNull("imageBucket")
+        && isStringOrNull("imagePath")
+        && isStringOrNull("videoUrl")
+        && isStringOrNull("videoBucket")
+        && isStringOrNull("videoPath")
+        && isStringOrNull("audioUrl")
+        && isStringOrNull("audioBucket")
+        && isStringOrNull("audioPath")
+        && isStringOrNull("taggedUid")
+        && isStringOrNull("taggedPseudo")
+        && isStringOrNull("torpilleId")
+        && isNumberOrNull("audioDurationSeconds")
+        && isNumberOrNull("tagX")
+        && isNumberOrNull("tagY")
+        && (
+          (
+            request.resource.data.type == "text"
+            && ("text" in request.resource.data)
+            && request.resource.data.text is string
+          )
+          ||
+          (
+            request.resource.data.type == "image"
+            && ("imageBucket" in request.resource.data)
+            && ("imagePath" in request.resource.data)
+            && request.resource.data.imageBucket is string
+            && request.resource.data.imagePath is string
+          )
+          ||
+          (
+            request.resource.data.type == "video"
+            && ("videoBucket" in request.resource.data)
+            && ("videoPath" in request.resource.data)
+            && request.resource.data.videoBucket is string
+            && request.resource.data.videoPath is string
+          )
+          ||
+          (
+            request.resource.data.type == "audio"
+            && ("audioBucket" in request.resource.data)
+            && ("audioPath" in request.resource.data)
+            && ("audioDurationSeconds" in request.resource.data)
+            && request.resource.data.audioBucket is string
+            && request.resource.data.audioPath is string
+            && request.resource.data.audioDurationSeconds is number
+          )
+        );
+    }
+
+    function isValidTorpilleCreate(communityId) {
+      return isSignedIn()
+        && isCommunityParticipant(communityId)
+        && request.resource.data.fromUid == myUid()
+        && request.resource.data.keys().hasOnly(torpilleEditableKeys())
+        && request.resource.data.communityId == communityId
+        && isStringOrNull("id")
+        && isStringOrNull("fromUid")
+        && isStringOrNull("toUid")
+        && isStringOrNull("communityId")
+        && isStringOrNull("videoBucket")
+        && isStringOrNull("videoPath")
+        && isStringOrNull("videoUrl")
+        && isStringOrNull("taggedPseudo")
+        && isStringOrNull("nextToUid")
+        && isNumberOrNull("tagX")
+        && isNumberOrNull("tagY")
+        && isBoolOrNull("responded")
+        && isBoolOrNull("penaltyApplied");
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && myUid() == uid
+        && isValidUserCreate(uid);
+
+      allow update: if isSignedIn()
+        && myUid() == uid
+        && isValidUserUpdate(uid);
+
+      allow delete: if false;
+    }
+
+    match /pseudos/{pseudoKey} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && !exists(/databases/$(database)/documents/pseudos/$(pseudoKey))
+        && request.resource.data.uid == myUid();
+
+      allow delete: if isSignedIn() && resource.data.uid == myUid();
+      allow update: if false;
+    }
+
+    match /communities/{communityId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.adminUid == myUid();
+
+      allow update, delete: if isCommunityAdmin(communityId);
+
+      match /allowlist/{pseudoKey} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isCommunityAdmin(communityId);
+      }
+
+      match /members/{uid} {
+        allow read: if isSignedIn()
+          && (isCommunityAdmin(communityId) || isMember(communityId));
+
+        allow create: if isSignedIn()
+          && (myUid() == uid || isCommunityAdmin(communityId))
+          && (
+            isCommunityAdmin(communityId)
+            || isCommunityPublic(communityId)
+            || isInAllowlist(communityId)
+          );
+
+        allow update: if isSignedIn()
+          && (
+            (
+              myUid() == uid
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(memberSystemEditableKeys())
+            )
+            || (
+              isCommunityParticipant(communityId)
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(memberSystemEditableKeys())
+            )
+            || isCommunityAdmin(communityId)
+          );
+
+        allow delete: if false;
+      }
+
+      match /messages/{messageId} {
+        allow read: if isCommunityParticipant(communityId);
+        allow create: if isValidMessageCreate(communityId);
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /torpilles/{torpilleId} {
+        allow read: if isSignedIn();
+
+        allow create: if isValidTorpilleCreate(communityId);
+
+        allow update: if isSignedIn()
+          && isCommunityParticipant(communityId)
+          && request.resource.data.keys().hasOnly(torpilleEditableKeys());
+
+        allow delete: if false;
+      }
+    }
+  }
+}

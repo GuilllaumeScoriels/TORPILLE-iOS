@@ -37,6 +37,7 @@ enum AppRoute: Equatable {
     case community(String)
     case communityInfo(String)
     case globalLeaderboard
+    case notificationCenter
 }
 
 @MainActor
@@ -51,10 +52,13 @@ final class AppRootViewModel: ObservableObject {
 
     func bootstrap() async {
         let uid = env.authRepository.currentUID
-        guard uid != nil else {
+        guard !uid.isEmpty else {
+            env.notificationCenterService.stop()
             route = .auth
             return
         }
+
+        env.notificationCenterService.start()
 
         do {
             let me = try await env.userRepository.getMeOrThrow()
@@ -74,7 +78,8 @@ final class AppRootViewModel: ObservableObject {
 
         pendingJoinCommunityId = communityId
 
-        if env.authRepository.currentUID == nil {
+        if env.authRepository.currentUID.isEmpty {
+            env.notificationCenterService.stop()
             route = .auth
             return
         }
@@ -106,6 +111,12 @@ final class AppRootViewModel: ObservableObject {
 
     func clearPendingJoin() {
         pendingJoinCommunityId = nil
+    }
+
+
+    func openNotificationCenter() {
+        env.notificationCenterService.markAllAsRead()
+        route = .notificationCenter
     }
 
     private func extractCommunityId(from url: URL) -> String? {
@@ -275,6 +286,21 @@ final class HomeViewModel: ObservableObject {
         communitiesRegistration = communityRepository.observeCommunitiesForMe { [weak self] values in
             DispatchQueue.main.async { self?.communities = values }
         }
+
+        Task {
+            do {
+                let communityIds = try await communityRepository.myCommunityIds()
+                if communityIds.isEmpty {
+                    try await communityRepository.syncMyTotalXP()
+                } else {
+                    for communityId in communityIds {
+                        try await communityRepository.syncXPState(communityId: communityId)
+                    }
+                }
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
     }
 
     func saveProfile(pseudo: String, imageData: Data?, profileIcon: String?) async -> Bool {
@@ -391,6 +417,21 @@ final class GlobalLeaderboardViewModel: ObservableObject {
                 self.selectedCommunityIds = self.selectedCommunityIds.intersection(validIds)
                 self.updateMemberListeners()
                 self.refreshPlayers()
+            }
+        }
+
+        Task {
+            do {
+                let communityIds = try await communityRepository.myCommunityIds()
+                if communityIds.isEmpty {
+                    try await communityRepository.syncMyTotalXP()
+                } else {
+                    for communityId in communityIds {
+                        try await communityRepository.syncXPState(communityId: communityId)
+                    }
+                }
+            } catch {
+                print(debugErrorMessage(error))
             }
         }
     }
@@ -633,6 +674,14 @@ final class CommunityViewModel: ObservableObject {
                 self?.refreshUnseenTorpilles()
             }
         }
+
+        Task {
+            do {
+                try await communityRepo.syncXPState(communityId: communityId)
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
     }
 
     private func refreshUnseenTorpilles() {
@@ -712,7 +761,13 @@ final class CommunityViewModel: ObservableObject {
         }
     }
 
-    func sendVideoTorpille(communityId: String, fileURL: URL, taggedMember: Member, tagX: Double, tagY: Double) {
+    func sendVideoTorpille(communityId: String, fileURL: URL, taggedMember: Member?, fallbackPseudoText: String, tagX: Double, tagY: Double) {
+        let cleanFallbackPseudoText = fallbackPseudoText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard taggedMember != nil || !cleanFallbackPseudoText.isEmpty else {
+            error = "Indique un pseudo avant d'envoyer la torpille."
+            return
+        }
+
         error = nil
         isSending = true
         Task {
@@ -723,8 +778,8 @@ final class CommunityViewModel: ObservableObject {
                     communityId: communityId,
                     senderPseudo: senderPseudo,
                     localFileURL: fileURL,
-                    taggedUid: taggedMember.uid,
-                    taggedPseudo: taggedMember.displayName,
+                    taggedUid: taggedMember?.uid,
+                    taggedPseudo: taggedMember?.displayName ?? cleanFallbackPseudoText,
                     tagX: tagX,
                     tagY: tagY
                 )
@@ -828,25 +883,44 @@ final class MapViewModel: ObservableObject {
     @Published var members: [Member] = []
     @Published var showOnlyRecentlyConnected = false
     @Published var error: String?
+    @Published var isSendingTorpille = false
 
     private let repo: CommunityRepository
+    private let userRepository: UserRepository
     private let locationService: LocationService
     private var communitiesRegistration: ListenerRegistration?
     private var membersRegistration: ListenerRegistration?
+    private var sharedCommunityRegistrations: [String: ListenerRegistration] = [:]
+    private var memberUIDsByCommunity: [String: Set<String>] = [:]
 
-    init(repo: CommunityRepository, locationService: LocationService) {
+    init(repo: CommunityRepository, userRepository: UserRepository, locationService: LocationService) {
         self.repo = repo
+        self.userRepository = userRepository
         self.locationService = locationService
+    }
+
+    var currentUserId: String {
+        repo.currentUID
     }
 
     func start() {
         communitiesRegistration?.remove()
+        removeSharedCommunityListeners()
+        memberUIDsByCommunity = [:]
+
         communitiesRegistration = repo.observeCommunitiesForMe { [weak self] values in
             DispatchQueue.main.async {
-                self?.communities = values
-                if self?.selectedCommunityId.isEmpty == true, let first = values.first {
-                    self?.selectedCommunityId = first.stableId
-                    self?.listenMembers(for: first.stableId)
+                guard let self else { return }
+                self.communities = values
+                self.updateSharedCommunityListeners(with: values)
+                if values.contains(where: { $0.stableId == self.selectedCommunityId }) == false {
+                    if let first = values.first {
+                        self.selectedCommunityId = first.stableId
+                        self.listenMembers(for: first.stableId)
+                    } else {
+                        self.selectedCommunityId = ""
+                        self.members = []
+                    }
                 }
             }
         }
@@ -863,6 +937,43 @@ final class MapViewModel: ObservableObject {
             do {
                 let location = try await locationService.currentLocation()
                 try await repo.updateMyLocation(in: communities.map { $0.stableId }, latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func sharedCommunities(with memberId: String) -> [Community] {
+        communities.filter { community in
+            let communityId = community.stableId
+            return memberUIDsByCommunity[communityId]?.contains(memberId) == true
+        }
+        .sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    func sendVideoTorpille(fileURL: URL, to member: MapMemberAnnotation, in communityId: String) {
+        error = nil
+        isSendingTorpille = true
+
+        Task {
+            defer { isSendingTorpille = false }
+
+            do {
+                let profile = try await userRepository.getMeOrThrow()
+                let senderPseudo = profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleanSenderPseudo = senderPseudo.isEmpty ? profile.uid : senderPseudo
+
+                try await repo.sendVideoTorpille(
+                    communityId: communityId,
+                    senderPseudo: cleanSenderPseudo,
+                    localFileURL: fileURL,
+                    taggedUid: member.id,
+                    taggedPseudo: member.pseudo,
+                    tagX: 0.5,
+                    tagY: 0.2
+                )
             } catch {
                 self.error = debugErrorMessage(error)
             }
@@ -911,9 +1022,38 @@ final class MapViewModel: ObservableObject {
         }
     }
 
+    private func updateSharedCommunityListeners(with communities: [Community]) {
+        let desiredIds = Set(communities.map(\.stableId))
+        let currentIds = Set(sharedCommunityRegistrations.keys)
+
+        for communityId in currentIds.subtracting(desiredIds) {
+            sharedCommunityRegistrations[communityId]?.remove()
+            sharedCommunityRegistrations.removeValue(forKey: communityId)
+            memberUIDsByCommunity.removeValue(forKey: communityId)
+        }
+
+        for communityId in desiredIds.subtracting(currentIds) {
+            sharedCommunityRegistrations[communityId] = repo.observeMembers(communityId) { [weak self] members in
+                DispatchQueue.main.async {
+                    self?.memberUIDsByCommunity[communityId] = Set(members.map(\.uid).filter { !$0.isEmpty })
+                }
+            }
+        }
+    }
+
+    private func removeSharedCommunityListeners() {
+        for registration in sharedCommunityRegistrations.values {
+            registration.remove()
+        }
+        sharedCommunityRegistrations.removeAll()
+    }
+
     deinit {
         communitiesRegistration?.remove()
         membersRegistration?.remove()
+        for registration in sharedCommunityRegistrations.values {
+            registration.remove()
+        }
     }
 }
 
@@ -922,17 +1062,20 @@ final class MapViewModel: ObservableObject {
 final class LaunchLocationSyncViewModel: ObservableObject {
     @Published var lastError: String?
 
+    private let authRepository: AuthRepository
     private let repo: CommunityRepository
     private let locationService: LocationService
     private var hasSyncedInThisSession = false
 
-    init(repo: CommunityRepository, locationService: LocationService) {
+    init(authRepository: AuthRepository, repo: CommunityRepository, locationService: LocationService) {
+        self.authRepository = authRepository
         self.repo = repo
         self.locationService = locationService
     }
 
     func syncOnAppOpenIfNeeded() async {
         guard !hasSyncedInThisSession else { return }
+        guard !authRepository.currentUID.isEmpty else { return }
         hasSyncedInThisSession = true
         lastError = nil
 

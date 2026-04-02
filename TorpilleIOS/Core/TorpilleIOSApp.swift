@@ -15,6 +15,7 @@
  */
 
 import SwiftUI
+import UIKit
 import FirebaseCore
 import FirebaseAppCheck
 
@@ -47,6 +48,16 @@ struct TorpilleIOSApp: App {
 
         firebaseConfigured = FirebaseApp.app() != nil
         env = firebaseConfigured ? AppEnvironment() : nil
+        _ = env?.notificationCenterService
+
+        let tabBarAppearance = UITabBarAppearance()
+        tabBarAppearance.configureWithOpaqueBackground()
+        tabBarAppearance.backgroundColor = .white
+        tabBarAppearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+        UITabBar.appearance().standardAppearance = tabBarAppearance
+        if #available(iOS 15.0, *) {
+            UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+        }
 
         if !firebaseConfigured {
             print("🔥 Firebase non configuré au démarrage. Vérifie que GoogleService-Info.plist est bien embarqué dans le target iOS.")
@@ -55,11 +66,14 @@ struct TorpilleIOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if let env {
-                AppRootView(viewModel: AppRootViewModel(env: env))
-            } else {
-                FirebaseSetupRequiredView()
+            Group {
+                if let env {
+                    AppRootView(viewModel: AppRootViewModel(env: env))
+                } else {
+                    FirebaseSetupRequiredView()
+                }
             }
+            .preferredColorScheme(ColorScheme.light)
         }
     }
 }
