@@ -1,0 +1,76 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true;
+    }
+
+    function isCommunityAdmin(communityId) {
+      return isSignedIn()
+        && exists(/databases/(default)/documents/communities/$(communityId))
+        && get(/databases/(default)/documents/communities/$(communityId)).data.adminUid == request.auth.uid;
+    }
+
+    function isCommunityMember(communityId) {
+      return isSignedIn()
+        && exists(/databases/(default)/documents/communities/$(communityId)/members/$(request.auth.uid));
+    }
+
+    function canAccessCommunityMedia(communityId) {
+      return isCommunityAdmin(communityId) || isCommunityMember(communityId);
+    }
+
+    function hasUploadPayload() {
+      return request.resource != null
+        && request.resource.size > 0;
+    }
+
+    match /users/{uid}/profile/{fileName=**} {
+      allow read: if isVerifiedEmail();
+
+      allow create, update: if isVerifiedEmail()
+        && request.auth.uid == uid
+        && hasUploadPayload()
+        && request.resource.size < 10 * 1024 * 1024;
+
+      allow delete: if isSignedIn()
+        && request.auth.uid == uid;
+    }
+
+    match /communities/{communityId}/images/{fileName=**} {
+      allow read: if isVerifiedEmail();
+
+      allow create, update: if isVerifiedEmail()
+        && hasUploadPayload()
+        && request.resource.size < 15 * 1024 * 1024;
+
+      allow delete: if false;
+    }
+
+    match /communities/{communityId}/videos/{fileName=**} {
+      allow read: if isVerifiedEmail();
+
+      allow create, update: if isVerifiedEmail()
+        && hasUploadPayload()
+        && request.resource.size < 200 * 1024 * 1024;
+
+      allow delete: if false;
+    }
+
+    match /communities/{communityId}/audios/{fileName=**} {
+      allow read: if isVerifiedEmail();
+
+      allow create, update: if isVerifiedEmail()
+        && hasUploadPayload()
+        && request.resource.size < 30 * 1024 * 1024;
+
+      allow delete: if false;
+    }
+  }
+}

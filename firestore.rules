@@ -1,0 +1,617 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true;
+    }
+
+    function canUseVerifiedProfile() {
+      return isVerifiedEmail()
+        || myProfileExists();
+    }
+
+    function myUid() {
+      return request.auth.uid;
+    }
+
+    function myProfilePath() {
+      return /databases/$(database)/documents/users/$(myUid());
+    }
+
+    function myProfileExists() {
+      return isSignedIn() && exists(myProfilePath());
+    }
+
+    function myProfile() {
+      return get(myProfilePath()).data;
+    }
+
+    function myPseudoKeyOrNull() {
+      return myProfileExists()
+        && ("pseudoKey" in myProfile())
+        && (myProfile().pseudoKey is string)
+        && myProfile().pseudoKey.size() > 0
+        ? myProfile().pseudoKey
+        : null;
+    }
+
+    function communityPath(communityId) {
+      return /databases/$(database)/documents/communities/$(communityId);
+    }
+
+    function communityExists(communityId) {
+      return exists(communityPath(communityId));
+    }
+
+    function communityDoc(communityId) {
+      return get(communityPath(communityId));
+    }
+
+    function communityData(communityId) {
+      return communityDoc(communityId).data;
+    }
+
+    function torpillePath(communityId, torpilleId) {
+      return /databases/$(database)/documents/communities/$(communityId)/torpilles/$(torpilleId);
+    }
+
+    function savedMessagePath(communityId, messageId) {
+      return /databases/$(database)/documents/communities/$(communityId)/savedMessages/$(messageId);
+    }
+
+    function isCommunityAdmin(communityId) {
+      return isSignedIn()
+        && communityExists(communityId)
+        && myUid() == communityData(communityId).adminUid;
+    }
+
+    function isCommunityPublic(communityId) {
+      return communityExists(communityId)
+        && (
+          !("isPublic" in communityData(communityId))
+          || communityData(communityId).isPublic == true
+        );
+    }
+
+    function isInAllowlist(communityId) {
+      let pk = myPseudoKeyOrNull();
+      return pk != null
+        && exists(/databases/$(database)/documents/communities/$(communityId)/allowlist/$(pk));
+    }
+
+    function isMember(communityId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(myUid()));
+    }
+
+    function isBannedFromCommunity(communityId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/communities/$(communityId)/banned/$(myUid()));
+    }
+
+    function isCommunityParticipant(communityId) {
+      return isCommunityAdmin(communityId) || isMember(communityId);
+    }
+
+    function isMemberUid(communityId, uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(uid));
+    }
+
+    function isStringOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is string;
+    }
+
+    function isNumberOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is number;
+    }
+
+    function isBoolOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is bool;
+    }
+
+    function isTimestampOrNull(fieldName) {
+      return !(fieldName in request.resource.data)
+        || request.resource.data[fieldName] == null
+        || request.resource.data[fieldName] is timestamp;
+    }
+
+    function isValidPinnedCommunityIds(data) {
+      return !("pinnedCommunityIds" in data)
+        || (
+          data.pinnedCommunityIds is list
+          && data.pinnedCommunityIds.size() <= 3
+          && (data.pinnedCommunityIds.size() < 1 || data.pinnedCommunityIds[0] is string)
+          && (data.pinnedCommunityIds.size() < 2 || data.pinnedCommunityIds[1] is string)
+          && (data.pinnedCommunityIds.size() < 3 || data.pinnedCommunityIds[2] is string)
+        );
+    }
+
+    function isValidCommunityIds(data) {
+      return !("communityIds" in data)
+        || (
+          data.communityIds is list
+          && (data.communityIds.size() < 1 || data.communityIds[0] is string)
+          && (data.communityIds.size() < 2 || data.communityIds[1] is string)
+          && (data.communityIds.size() < 3 || data.communityIds[2] is string)
+          && (data.communityIds.size() < 4 || data.communityIds[3] is string)
+          && (data.communityIds.size() < 5 || data.communityIds[4] is string)
+          && (data.communityIds.size() < 6 || data.communityIds[5] is string)
+          && (data.communityIds.size() < 7 || data.communityIds[6] is string)
+          && (data.communityIds.size() < 8 || data.communityIds[7] is string)
+          && (data.communityIds.size() < 9 || data.communityIds[8] is string)
+          && (data.communityIds.size() < 10 || data.communityIds[9] is string)
+          && (data.communityIds.size() < 11 || data.communityIds[10] is string)
+          && (data.communityIds.size() < 12 || data.communityIds[11] is string)
+          && (data.communityIds.size() < 13 || data.communityIds[12] is string)
+          && (data.communityIds.size() < 14 || data.communityIds[13] is string)
+          && (data.communityIds.size() < 15 || data.communityIds[14] is string)
+          && (data.communityIds.size() < 16 || data.communityIds[15] is string)
+          && (data.communityIds.size() < 17 || data.communityIds[16] is string)
+          && (data.communityIds.size() < 18 || data.communityIds[17] is string)
+          && (data.communityIds.size() < 19 || data.communityIds[18] is string)
+          && (data.communityIds.size() < 20 || data.communityIds[19] is string)
+        );
+    }
+
+    function isValidFcmTokens(data) {
+      return !("fcmTokens" in data)
+        || (
+          data.fcmTokens is list
+          && data.fcmTokens.size() <= 10
+          && (data.fcmTokens.size() < 1 || data.fcmTokens[0] is string)
+          && (data.fcmTokens.size() < 2 || data.fcmTokens[1] is string)
+          && (data.fcmTokens.size() < 3 || data.fcmTokens[2] is string)
+          && (data.fcmTokens.size() < 4 || data.fcmTokens[3] is string)
+          && (data.fcmTokens.size() < 5 || data.fcmTokens[4] is string)
+          && (data.fcmTokens.size() < 6 || data.fcmTokens[5] is string)
+          && (data.fcmTokens.size() < 7 || data.fcmTokens[6] is string)
+          && (data.fcmTokens.size() < 8 || data.fcmTokens[7] is string)
+          && (data.fcmTokens.size() < 9 || data.fcmTokens[8] is string)
+          && (data.fcmTokens.size() < 10 || data.fcmTokens[9] is string)
+        );
+    }
+
+    function userAllowedKeys() {
+      return [
+        "uid",
+        "email",
+        "pseudo",
+        "pseudoKey",
+        "profileIcon",
+        "photoUrl",
+        "communityIds",
+        "pinnedCommunityIds",
+        "xptotal",
+        "xpTotal",
+        "fcmToken",
+        "fcmTokens",
+        "createdAt",
+        "updatedAt",
+        "lastLatitude",
+        "lastLongitude",
+        "lastLocationUpdatedAt"
+      ];
+    }
+
+    function memberCreateKeys() {
+      return [
+        "uid",
+        "pseudo",
+        "xpInCommunity",
+        "photoUrl",
+        "profileIcon"
+      ];
+    }
+
+    function isValidUserDocument(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly(userAllowedKeys())
+        && request.resource.data.uid is string
+        && isStringOrNull("email")
+        && isStringOrNull("pseudo")
+        && isStringOrNull("pseudoKey")
+        && isStringOrNull("profileIcon")
+        && isStringOrNull("photoUrl")
+        && isStringOrNull("fcmToken")
+        && isValidFcmTokens(request.resource.data)
+        && isValidCommunityIds(request.resource.data)
+        && isValidPinnedCommunityIds(request.resource.data)
+        && isNumberOrNull("xptotal")
+        && isNumberOrNull("xpTotal")
+        && isNumberOrNull("lastLatitude")
+        && isNumberOrNull("lastLongitude")
+        && (
+          !("xptotal" in request.resource.data)
+          || !("xpTotal" in request.resource.data)
+          || request.resource.data.xptotal == request.resource.data.xpTotal
+        );
+    }
+
+    function isValidPseudoReservation() {
+      return request.resource.data.keys().hasOnly(["uid", "createdAt"])
+        && request.resource.data.uid == myUid();
+    }
+
+    function isValidCommunityCreate(communityId) {
+      return request.resource.data.id == communityId
+        && request.resource.data.adminUid == myUid()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.isPublic is bool
+        && request.resource.data.responseTimeSeconds is number
+        && request.resource.data.responseTimeSeconds > 0;
+    }
+
+    function isValidCommunityUpdate(communityId) {
+      return request.resource.data.id == communityId
+        && request.resource.data.adminUid == resource.data.adminUid
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.isPublic is bool
+        && request.resource.data.responseTimeSeconds is number
+        && request.resource.data.responseTimeSeconds > 0;
+    }
+
+    function isValidCommunityAdminTransfer(communityId) {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(["adminUid"])
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.isPublic == resource.data.isPublic
+        && request.resource.data.responseTimeSeconds == resource.data.responseTimeSeconds
+        && request.resource.data.adminUid is string
+        && request.resource.data.adminUid != myUid()
+        && isMemberUid(communityId, request.resource.data.adminUid);
+    }
+
+    function isValidMemberCreate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly(memberCreateKeys())
+        && request.resource.data.pseudo is string
+        && request.resource.data.xpInCommunity is number
+        && request.resource.data.xpInCommunity == 0
+        && isStringOrNull("photoUrl")
+        && isStringOrNull("profileIcon");
+    }
+
+    function isValidMessageCreate(communityId, messageId) {
+      return isSignedIn()
+        && request.resource.data.senderUid == myUid()
+        && (
+          !("id" in request.resource.data)
+          || request.resource.data.id == null
+          || request.resource.data.id == messageId
+        )
+        && request.resource.data.type in ["text", "image", "video", "audio"]
+        && isStringOrNull("senderPseudo")
+        && isStringOrNull("text")
+        && isStringOrNull("imageUrl")
+        && isStringOrNull("imageBucket")
+        && isStringOrNull("imagePath")
+        && isStringOrNull("videoUrl")
+        && isStringOrNull("videoBucket")
+        && isStringOrNull("videoPath")
+        && isStringOrNull("audioUrl")
+        && isStringOrNull("audioBucket")
+        && isStringOrNull("audioPath")
+        && isStringOrNull("taggedUid")
+        && isStringOrNull("taggedPseudo")
+        && isStringOrNull("torpilleId")
+        && isStringOrNull("savedByUid")
+        && isStringOrNull("savedByPseudo")
+        && isNumberOrNull("audioDurationSeconds")
+        && isNumberOrNull("tagX")
+        && isNumberOrNull("tagY")
+        && isTimestampOrNull("savedAt");
+    }
+
+    function isMessageSaved(resourceData) {
+      return ("savedAt" in resourceData) && resourceData.savedAt != null;
+    }
+
+    function isUnsavedExpiredMessage() {
+      return !isMessageSaved(resource.data)
+        && ("createdAt" in resource.data)
+        && resource.data.createdAt is timestamp
+        && request.time >= resource.data.createdAt + duration.value(7, "d");
+    }
+
+    function isValidMessageSaveUpdate(messageId) {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "savedAt",
+          "savedByUid",
+          "savedByPseudo"
+        ])
+        && (!("savedAt" in resource.data) || resource.data.savedAt == null)
+        && request.resource.data.savedAt is timestamp
+        && request.resource.data.savedByUid == myUid()
+        && isStringOrNull("savedByPseudo")
+        && (
+          !("id" in request.resource.data)
+          || request.resource.data.id == null
+          || request.resource.data.id == messageId
+        );
+    }
+
+    function isValidSavedMessageWrite(messageId) {
+      return isSignedIn()
+        && request.resource.data.senderUid is string
+        && request.resource.data.type in ["text", "image", "video", "audio"]
+        && request.resource.data.savedByUid == myUid()
+        && request.resource.data.savedAt is timestamp
+        && (
+          !("id" in request.resource.data)
+          || request.resource.data.id == null
+          || request.resource.data.id == messageId
+        );
+    }
+
+    function isValidTorpilleCreate(communityId, torpilleId) {
+      return isSignedIn()
+        && request.resource.data.id == torpilleId
+        && request.resource.data.fromUid == myUid()
+        && request.resource.data.communityId == communityId
+        && isStringOrNull("fromPseudo")
+        && isStringOrNull("toUid")
+        && isStringOrNull("videoBucket")
+        && isStringOrNull("videoPath")
+        && isStringOrNull("videoUrl")
+        && isStringOrNull("taggedPseudo")
+        && isNumberOrNull("tagX")
+        && isNumberOrNull("tagY")
+        && request.resource.data.responded is bool
+        && (
+          !("penaltyApplied" in request.resource.data)
+          || request.resource.data.penaltyApplied is bool
+        );
+    }
+
+    function isValidNotificationPreference(uid, communityId) {
+      return request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "communityId",
+          "communityName",
+          "mode",
+          "updatedAt"
+        ])
+        && request.resource.data.communityId == communityId
+        && request.resource.data.communityName is string
+        && request.resource.data.mode in ["all", "mentionsOnly"];
+    }
+
+    function isValidReelCreate(reelId) {
+      let communityId = request.resource.data.communityId;
+      let sourceMessageId = request.resource.data.sourceMessageId;
+      return request.resource.data.keys().hasOnly([
+          "id",
+          "torpilleId",
+          "sourceMessageId",
+          "communityId",
+          "communityName",
+          "authorUid",
+          "authorPseudo",
+          "videoUrl",
+          "videoBucket",
+          "videoPath",
+          "taggedPseudo",
+          "createdAt",
+          "publishedAt"
+        ])
+        && request.resource.data.id == reelId
+        && request.resource.data.torpilleId == reelId
+        && request.resource.data.authorUid == myUid()
+        && communityId is string
+        && sourceMessageId is string
+        && request.resource.data.communityName is string
+        && request.resource.data.authorPseudo is string
+        && isStringOrNull("videoUrl")
+        && isStringOrNull("videoBucket")
+        && isStringOrNull("videoPath")
+        && isStringOrNull("taggedPseudo")
+        && isTimestampOrNull("createdAt")
+        && request.resource.data.publishedAt is timestamp
+        && exists(savedMessagePath(communityId, sourceMessageId))
+        && get(savedMessagePath(communityId, sourceMessageId)).data.torpilleId == reelId
+        && exists(torpillePath(communityId, reelId))
+        && get(torpillePath(communityId, reelId)).data.fromUid == myUid();
+    }
+
+    function isValidXPOnlyUserUpdate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "xptotal",
+          "xpTotal",
+          "updatedAt"
+        ])
+        && isNumberOrNull("xptotal")
+        && isNumberOrNull("xpTotal")
+        && isTimestampOrNull("updatedAt")
+        && (
+          !("xptotal" in request.resource.data)
+          || !("xpTotal" in request.resource.data)
+          || request.resource.data.xptotal == request.resource.data.xpTotal
+        );
+    }
+
+    function isValidPinnedCommunitiesOnlyUpdate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "pinnedCommunityIds",
+          "updatedAt"
+        ])
+        && isValidPinnedCommunityIds(request.resource.data)
+        && isTimestampOrNull("updatedAt");
+    }
+
+    function isValidCommunityIdsOnlyUpdate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "communityIds",
+          "updatedAt"
+        ])
+        && isValidCommunityIds(request.resource.data)
+        && isTimestampOrNull("updatedAt");
+    }
+
+    function isValidPushTokensOnlyUpdate(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "fcmToken",
+          "fcmTokens",
+          "updatedAt"
+        ])
+        && isStringOrNull("fcmToken")
+        && isValidFcmTokens(request.resource.data)
+        && isTimestampOrNull("updatedAt");
+    }
+
+    match /users/{uid} {
+      allow read: if isVerifiedEmail()
+        || (isSignedIn() && myUid() == uid);
+
+      allow create: if isVerifiedEmail()
+        && myUid() == uid
+        && isValidUserDocument(uid);
+
+      allow update: if myUid() == uid
+        && (
+          (canUseVerifiedProfile() && isValidUserDocument(uid))
+          || isValidXPOnlyUserUpdate(uid)
+          || isValidPushTokensOnlyUpdate(uid)
+          || isValidCommunityIdsOnlyUpdate(uid)
+          || isValidPinnedCommunitiesOnlyUpdate(uid)
+        );
+
+      allow delete: if isSignedIn() && myUid() == uid;
+
+      match /notificationPreferences/{communityId} {
+        allow read: if isSignedIn() && myUid() == uid;
+        allow create, update: if canUseVerifiedProfile()
+          && myUid() == uid
+          && isValidNotificationPreference(uid, communityId);
+        allow delete: if isSignedIn() && myUid() == uid;
+      }
+    }
+
+    match /pseudos/{pseudoKey} {
+      allow read: if isVerifiedEmail();
+
+      allow create: if isVerifiedEmail()
+        && !exists(/databases/$(database)/documents/pseudos/$(pseudoKey))
+        && isValidPseudoReservation();
+
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.uid == myUid();
+    }
+
+    match /reels/{reelId} {
+      allow read: if canUseVerifiedProfile();
+      allow create: if canUseVerifiedProfile()
+        && isValidReelCreate(reelId);
+      allow update: if false;
+      allow delete: if canUseVerifiedProfile()
+        && resource.data.authorUid == myUid();
+    }
+
+    match /communities/{communityId} {
+      allow read: if canUseVerifiedProfile()
+        || (isSignedIn() && isCommunityParticipant(communityId));
+
+      allow create: if canUseVerifiedProfile()
+        && request.resource.data.adminUid == myUid();
+
+      allow update: if isSignedIn()
+        && isCommunityAdmin(communityId)
+        && (
+          isValidCommunityUpdate(communityId)
+          || isValidCommunityAdminTransfer(communityId)
+        );
+
+      allow delete: if isSignedIn() && isCommunityAdmin(communityId);
+
+      match /allowlist/{pseudoKey} {
+        allow read: if isSignedIn() && isCommunityAdmin(communityId);
+        allow create, update, delete: if isSignedIn() && isCommunityAdmin(communityId);
+      }
+
+      match /banned/{uid} {
+        allow read: if isSignedIn() && isCommunityAdmin(communityId);
+        allow create, update, delete: if isSignedIn() && isCommunityAdmin(communityId);
+      }
+
+      match /members/{uid} {
+        allow read: if canUseVerifiedProfile()
+          || (isSignedIn()
+            && (
+              myUid() == uid
+              || isCommunityParticipant(communityId)
+            ));
+
+        allow create: if canUseVerifiedProfile()
+          && (myUid() == uid || isCommunityAdmin(communityId))
+          && !isBannedFromCommunity(communityId)
+          && isValidMemberCreate(uid);
+
+        allow update: if canUseVerifiedProfile()
+          && (
+            myUid() == uid
+            || isCommunityParticipant(communityId)
+            || isCommunityAdmin(communityId)
+          );
+
+        allow delete: if isSignedIn()
+          && (
+            myUid() == uid
+            || isCommunityAdmin(communityId)
+          );
+      }
+
+      match /messages/{messageId} {
+        allow read: if (canUseVerifiedProfile() && isCommunityParticipant(communityId))
+          || (isSignedIn() && isCommunityAdmin(communityId));
+        allow create: if canUseVerifiedProfile() && isValidMessageCreate(communityId, messageId);
+        allow update: if canUseVerifiedProfile()
+          && isCommunityParticipant(communityId)
+          && isValidMessageSaveUpdate(messageId);
+        allow delete: if (isSignedIn() && isCommunityAdmin(communityId))
+          || (canUseVerifiedProfile()
+            && isCommunityParticipant(communityId)
+            && isUnsavedExpiredMessage());
+      }
+
+      match /savedMessages/{messageId} {
+        allow read: if (canUseVerifiedProfile() && isCommunityParticipant(communityId))
+          || (isSignedIn() && isCommunityAdmin(communityId));
+        allow create, update: if canUseVerifiedProfile()
+          && isCommunityParticipant(communityId)
+          && isValidSavedMessageWrite(messageId);
+        allow delete: if isSignedIn() && isCommunityAdmin(communityId);
+      }
+
+      match /torpilles/{torpilleId} {
+        allow read: if (canUseVerifiedProfile() && isCommunityParticipant(communityId))
+          || (isSignedIn() && isCommunityAdmin(communityId));
+
+        allow create: if canUseVerifiedProfile() && isValidTorpilleCreate(communityId, torpilleId);
+
+        allow update: if canUseVerifiedProfile();
+
+        allow delete: if isSignedIn() && isCommunityAdmin(communityId);
+      }
+    }
+  }
+}
