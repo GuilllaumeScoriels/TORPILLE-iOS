@@ -34,12 +34,14 @@ struct CommunityScreen: View {
     @State private var showTorpilleCamera = false
     @State private var showTorpilleRecipientSheet = false
     @State private var torpilleRecipientQuery = ""
-    @State private var unseenPlaybackQueue: [Torpille] = []
+    @State private var unseenPlaybackItems: [Torpille] = []
+    @State private var unseenPlaybackIndex: Int?
     @State private var unseenPlaybackLastSeenTimestamp: Timestamp?
     @State private var hasScrolledToBottomOnOpen = false
     @State private var hasPerformedInitialUnreadPositioning = false
     @State private var hasCompletedInitialPositioning = false
     @State private var isAtBottom = true
+    @State private var reportingMessage: Message?
     @FocusState private var isComposerFocused: Bool
 
     init(env: AppEnvironment, communityId: String, onBack: @escaping () -> Void, onOpenInfo: @escaping () -> Void) {
@@ -189,6 +191,19 @@ struct CommunityScreen: View {
         .sheet(isPresented: $showTorpilleCamera) {
             CameraMediaPicker(selectedFileURL: $torpilleFileURL, allowedTypes: .videoOnly)
         }
+        .sheet(item: $reportingMessage) { message in
+            ReportContentSheet(
+                title: "Signaler ce contenu",
+                reportedName: "@\(message.senderPseudo)",
+                onCancel: {
+                    reportingMessage = nil
+                },
+                onSubmit: { reason, details in
+                    vm.reportMessage(communityId: communityId, message: message, reason: reason, details: details)
+                    reportingMessage = nil
+                }
+            )
+        }
         .sheet(item: Binding(get: {
             playbackURL.map {
                 PlaybackContainer(
@@ -217,7 +232,17 @@ struct CommunityScreen: View {
                 senderText: item.sender,
                 tagX: item.tagX,
                 tagY: item.tagY,
-                onTap: unseenPlaybackQueue.isEmpty ? nil : {
+                onTap: unseenPlaybackIndex == nil ? nil : { region in
+                    Task {
+                        switch region {
+                        case .left:
+                            await rewindUnseenTorpillePlayback()
+                        case .right:
+                            await advanceUnseenTorpillePlayback()
+                        }
+                    }
+                },
+                onEnded: unseenPlaybackIndex == nil ? nil : {
                     Task { await advanceUnseenTorpillePlayback() }
                 }
             )
@@ -546,11 +571,13 @@ struct CommunityScreen: View {
             .buttonStyle(.plain)
             .contextMenu {
                 saveMenuItem(for: message)
+                safetyMenuItems(for: message)
             }
         } else {
             compactMessageRowContent(message)
                 .contextMenu {
                     saveMenuItem(for: message)
+                    safetyMenuItems(for: message)
                 }
         }
     }
@@ -636,6 +663,28 @@ struct CommunityScreen: View {
                 vm.saveMessage(communityId: communityId, message: message)
             } label: {
                 Label("Enregistrer dans la discussion", systemImage: "bookmark.fill")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func safetyMenuItems(for message: Message) -> some View {
+        if message.senderUid != vm.me?.uid {
+            Divider()
+            Button {
+                reportingMessage = message
+            } label: {
+                Label("Signaler", systemImage: "exclamationmark.bubble.fill")
+            }
+            Button {
+                vm.hideContentFromSender(communityId: communityId, message: message)
+            } label: {
+                Label("Masquer ce membre ici", systemImage: "eye.slash.fill")
+            }
+            Button(role: .destructive) {
+                vm.blockSender(message: message)
+            } label: {
+                Label("Bloquer cet utilisateur", systemImage: "person.crop.circle.badge.xmark")
             }
         }
     }
@@ -916,7 +965,7 @@ struct CommunityScreen: View {
     }
 
     @MainActor
-    private func playTorpille(_ torpille: Torpille) async {
+    private func playTorpille(_ torpille: Torpille, reportError: Bool = true) async -> Bool {
         isLoadingMedia = true
         defer { isLoadingMedia = false }
         do {
@@ -927,38 +976,78 @@ struct CommunityScreen: View {
             playbackSender = torpille.fromPseudo.map { "@\($0)" }
             playbackTagX = torpille.tagX
             playbackTagY = torpille.tagY
+            return true
         } catch {
-            vm.error = error.localizedDescription
+            if reportError {
+                vm.error = error.localizedDescription
+            }
+            return false
         }
     }
 
     @MainActor
     private func startUnseenTorpillePlayback() async {
         guard !vm.unseenTorpilles.isEmpty else { return }
-        unseenPlaybackQueue = Array(vm.unseenTorpilles.dropFirst())
-        unseenPlaybackLastSeenTimestamp = vm.unseenTorpilles.first?.createdAt
-        if let first = vm.unseenTorpilles.first {
-            await playTorpille(first)
+        unseenPlaybackItems = vm.unseenTorpilles.sorted {
+            ($0.createdAt?.dateValue() ?? .distantPast) < ($1.createdAt?.dateValue() ?? .distantPast)
         }
+        unseenPlaybackIndex = nil
+        unseenPlaybackLastSeenTimestamp = nil
+        await playUnseenTorpille(at: 0)
     }
 
     @MainActor
-    private func advanceUnseenTorpillePlayback() async {
-        guard !unseenPlaybackQueue.isEmpty else {
+    private func playUnseenTorpille(at index: Int) async {
+        guard unseenPlaybackItems.indices.contains(index) else {
             playbackURL = nil
             finishUnseenTorpillePlaybackIfNeeded()
             return
         }
 
-        let next = unseenPlaybackQueue.removeFirst()
-        unseenPlaybackLastSeenTimestamp = next.createdAt ?? unseenPlaybackLastSeenTimestamp
-        await playTorpille(next)
+        unseenPlaybackIndex = index
+        let torpille = unseenPlaybackItems[index]
+        if await playTorpille(torpille, reportError: false) {
+            return
+        }
+
+        await playUnseenTorpille(at: index + 1)
+    }
+
+    @MainActor
+    private func advanceUnseenTorpillePlayback() async {
+        guard let currentIndex = unseenPlaybackIndex else { return }
+        markUnseenTorpilleSeen(at: currentIndex)
+        await playUnseenTorpille(at: currentIndex + 1)
+    }
+
+    @MainActor
+    private func rewindUnseenTorpillePlayback() async {
+        guard let currentIndex = unseenPlaybackIndex, currentIndex > 0 else { return }
+        await playUnseenTorpille(at: currentIndex - 1)
+    }
+
+    private func markUnseenTorpilleSeen(at index: Int) {
+        guard unseenPlaybackItems.indices.contains(index),
+              let timestamp = unseenPlaybackItems[index].createdAt else {
+            return
+        }
+
+        guard let currentTimestamp = unseenPlaybackLastSeenTimestamp else {
+            unseenPlaybackLastSeenTimestamp = timestamp
+            return
+        }
+
+        if timestamp.dateValue() > currentTimestamp.dateValue() {
+            unseenPlaybackLastSeenTimestamp = timestamp
+        }
     }
 
     private func finishUnseenTorpillePlaybackIfNeeded() {
-        guard let timestamp = unseenPlaybackLastSeenTimestamp else { return }
-        unseenPlaybackQueue = []
+        let timestamp = unseenPlaybackLastSeenTimestamp
+        unseenPlaybackItems = []
+        unseenPlaybackIndex = nil
         unseenPlaybackLastSeenTimestamp = nil
+        guard let timestamp else { return }
         vm.markTorpillesSeen(communityId: communityId, upTo: timestamp)
     }
 
@@ -1162,6 +1251,52 @@ private struct UnseenTorpillesSheet: View {
                 }
             }
             .navigationTitle("Torpilles")
+        }
+    }
+}
+
+struct ReportContentSheet: View {
+    let title: String
+    let reportedName: String
+    let onCancel: () -> Void
+    let onSubmit: (ReportReason, String) -> Void
+
+    @State private var reason: ReportReason = .harassment
+    @State private var details = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(reportedName)
+                        .font(.headline)
+                    Picker("Raison", selection: $reason) {
+                        ForEach(ReportReason.allCases) { reason in
+                            Text(reason.title).tag(reason)
+                        }
+                    }
+                } header: {
+                    Text("Contenu concerné")
+                }
+
+                Section {
+                    TextField("Ajoute un contexte si nécessaire", text: $details, axis: .vertical)
+                        .lineLimit(3...6)
+                } footer: {
+                    Text("Les signalements sont examinés rapidement. Les contenus abusifs peuvent être mis en quarantaine, supprimés et entraîner une suspension.")
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Annuler", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Envoyer") {
+                        onSubmit(reason, details)
+                    }
+                }
+            }
         }
     }
 }

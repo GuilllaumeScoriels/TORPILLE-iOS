@@ -159,12 +159,16 @@ struct ProfileSetupScreen: View {
                 VStack(spacing: 16) {
                     HStack {
                         Spacer()
-                        ProfileAvatarImageView(
-                            imageData: vm.selectedPhotoData,
-                            photoURL: nil,
-                            fallbackSymbol: "person.crop.circle.fill",
-                            size: 96
-                        )
+                        if vm.selectedPhotoData == nil, !vm.selectedProfileIcon.isEmpty {
+                            EmojiAvatarView(profileIcon: vm.selectedProfileIcon, size: 96)
+                        } else {
+                            ProfileAvatarImageView(
+                                imageData: vm.selectedPhotoData,
+                                photoURL: nil,
+                                fallbackSymbol: "person.crop.circle.fill",
+                                size: 96
+                            )
+                        }
                         Spacer()
                     }
 
@@ -191,12 +195,27 @@ struct ProfileSetupScreen: View {
 
                     ProfilePhotoPicker(selectedImageData: $vm.selectedPhotoData)
 
+                    if vm.selectedPhotoData == nil {
+                        ProfileIconPicker(selectedIcon: $vm.selectedProfileIcon)
+                    }
+
                     TextField(languageService.text(.profilePseudoPlaceholder), text: $vm.pseudo)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding()
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                    Toggle(isOn: $vm.acceptsTerms) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("J'accepte les règles de Torpille")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Tolérance zéro pour le harcèlement, les contenus sexuels explicites, les menaces, le spam et les contenus abusifs. Les contenus signalés peuvent être supprimés et les comptes fautifs suspendus.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
                 .padding(18)
                 .background(Color(.systemBackground))
@@ -214,7 +233,7 @@ struct ProfileSetupScreen: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(vm.isSaving || vm.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(vm.isSaving || !vm.canSubmitProfile)
 
                 if let error = vm.error {
                     Text(error)

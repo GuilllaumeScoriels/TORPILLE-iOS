@@ -427,20 +427,24 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TorpilleIOS/TorpilleIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Torpille;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled = NO;
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -448,7 +452,8 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_NAME = TorpilleIOS;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				STRIP_INSTALLED_PRODUCT = NO;
+				TARGETED_DEVICE_FAMILY = "1";
 			};
 			name = Debug;
 		};
@@ -463,7 +468,7 @@
 					"@loader_path/Frameworks",
 				);
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TorpilleIOS.app/TorpilleIOS";
 			};
 			name = Debug;
@@ -538,20 +543,24 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TorpilleIOS/TorpilleIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TorpilleIOS/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Torpille;
-				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleTypeRole\": \"Editor\", \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
+				INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled = NO;
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -559,7 +568,8 @@
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_NAME = TorpilleIOS;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				STRIP_INSTALLED_PRODUCT = NO;
+				TARGETED_DEVICE_FAMILY = "1";
 			};
 			name = Release;
 		};
@@ -574,7 +584,7 @@
 					"@loader_path/Frameworks",
 				);
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TorpilleIOS.app/TorpilleIOS";
 			};
 			name = Release;

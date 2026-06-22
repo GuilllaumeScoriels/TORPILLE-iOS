@@ -24,6 +24,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: TorpilleIOS/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: TorpilleIOS/TorpilleIOS.entitlements
+        COPY_PHASE_STRIP: NO
+        STRIP_INSTALLED_PRODUCT: NO
+        DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
         PRODUCT_NAME: TorpilleIOS
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_LSApplicationQueriesSchemes:
@@ -37,6 +40,13 @@ targets:
         INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled: NO
         INFOPLIST_KEY_UIBackgroundModes:
           - remote-notification
+        INFOPLIST_KEY_UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: com.torpille.deeplink

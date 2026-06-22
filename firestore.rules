@@ -13,7 +13,7 @@ service cloud.firestore {
 
     function canUseVerifiedProfile() {
       return isVerifiedEmail()
-        || myProfileExists();
+        && hasCompleteProfile();
     }
 
     function myUid() {
@@ -30,6 +30,21 @@ service cloud.firestore {
 
     function myProfile() {
       return get(myProfilePath()).data;
+    }
+
+    function hasCompleteProfile() {
+      return myProfileExists()
+        && ("pseudo" in myProfile())
+        && myProfile().pseudo is string
+        && myProfile().pseudo.size() >= 3
+        && (
+          (("photoUrl" in myProfile()) && myProfile().photoUrl is string && myProfile().photoUrl.size() > 0)
+          || (("profileIcon" in myProfile()) && myProfile().profileIcon is string && myProfile().profileIcon.size() > 0)
+        )
+        && ("termsAcceptedAt" in myProfile())
+        && myProfile().termsAcceptedAt is timestamp
+        && ("moderationRulesAcceptedAt" in myProfile())
+        && myProfile().moderationRulesAcceptedAt is timestamp;
     }
 
     function myPseudoKeyOrNull() {
@@ -139,6 +154,11 @@ service cloud.firestore {
         );
     }
 
+    function isValidCommunityXP(data) {
+      return !("communityXP" in data)
+        || data.communityXP is map;
+    }
+
     function isValidCommunityIds(data) {
       return !("communityIds" in data)
         || (
@@ -194,10 +214,17 @@ service cloud.firestore {
         "photoUrl",
         "communityIds",
         "pinnedCommunityIds",
+        "communityXP",
         "xptotal",
         "xpTotal",
         "fcmToken",
         "fcmTokens",
+        "languageCode",
+        "isLanguagePublic",
+        "isLeaderboardPublic",
+        "friendsCount",
+        "termsAcceptedAt",
+        "moderationRulesAcceptedAt",
         "createdAt",
         "updatedAt",
         "lastLatitude",
@@ -226,9 +253,16 @@ service cloud.firestore {
         && isStringOrNull("profileIcon")
         && isStringOrNull("photoUrl")
         && isStringOrNull("fcmToken")
+        && isStringOrNull("languageCode")
+        && isBoolOrNull("isLanguagePublic")
+        && isBoolOrNull("isLeaderboardPublic")
+        && isNumberOrNull("friendsCount")
+        && isTimestampOrNull("termsAcceptedAt")
+        && isTimestampOrNull("moderationRulesAcceptedAt")
         && isValidFcmTokens(request.resource.data)
         && isValidCommunityIds(request.resource.data)
         && isValidPinnedCommunityIds(request.resource.data)
+        && isValidCommunityXP(request.resource.data)
         && isNumberOrNull("xptotal")
         && isNumberOrNull("xpTotal")
         && isNumberOrNull("lastLatitude")
@@ -312,9 +346,11 @@ service cloud.firestore {
         && isStringOrNull("torpilleId")
         && isStringOrNull("savedByUid")
         && isStringOrNull("savedByPseudo")
+        && isStringOrNull("moderationStatus")
         && isNumberOrNull("audioDurationSeconds")
         && isNumberOrNull("tagX")
         && isNumberOrNull("tagY")
+        && isNumberOrNull("reportCount")
         && isTimestampOrNull("savedAt");
     }
 
@@ -374,6 +410,8 @@ service cloud.firestore {
         && isNumberOrNull("tagX")
         && isNumberOrNull("tagY")
         && request.resource.data.responded is bool
+        && isStringOrNull("moderationStatus")
+        && isNumberOrNull("reportCount")
         && (
           !("penaltyApplied" in request.resource.data)
           || request.resource.data.penaltyApplied is bool
@@ -409,7 +447,9 @@ service cloud.firestore {
           "videoPath",
           "taggedPseudo",
           "createdAt",
-          "publishedAt"
+          "publishedAt",
+          "moderationStatus",
+          "reportCount"
         ])
         && request.resource.data.id == reelId
         && request.resource.data.torpilleId == reelId
@@ -423,6 +463,8 @@ service cloud.firestore {
         && isStringOrNull("videoPath")
         && isStringOrNull("taggedPseudo")
         && isTimestampOrNull("createdAt")
+        && isStringOrNull("moderationStatus")
+        && isNumberOrNull("reportCount")
         && request.resource.data.publishedAt is timestamp
         && exists(savedMessagePath(communityId, sourceMessageId))
         && get(savedMessagePath(communityId, sourceMessageId)).data.torpilleId == reelId
@@ -435,8 +477,12 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "xptotal",
           "xpTotal",
+          "communityXP",
+          "communityIds",
           "updatedAt"
         ])
+        && isValidCommunityXP(request.resource.data)
+        && isValidCommunityIds(request.resource.data)
         && isNumberOrNull("xptotal")
         && isNumberOrNull("xpTotal")
         && isTimestampOrNull("updatedAt")
@@ -483,13 +529,13 @@ service cloud.firestore {
       allow read: if isVerifiedEmail()
         || (isSignedIn() && myUid() == uid);
 
-      allow create: if isVerifiedEmail()
+      allow create: if isSignedIn()
         && myUid() == uid
         && isValidUserDocument(uid);
 
       allow update: if myUid() == uid
         && (
-          (canUseVerifiedProfile() && isValidUserDocument(uid))
+          (isSignedIn() && isValidUserDocument(uid))
           || isValidXPOnlyUserUpdate(uid)
           || isValidPushTokensOnlyUpdate(uid)
           || isValidCommunityIdsOnlyUpdate(uid)
@@ -505,12 +551,109 @@ service cloud.firestore {
           && isValidNotificationPreference(uid, communityId);
         allow delete: if isSignedIn() && myUid() == uid;
       }
+
+      match /blockedUsers/{blockedUid} {
+        allow read: if isSignedIn() && myUid() == uid;
+        allow create, update: if canUseVerifiedProfile()
+          && myUid() == uid
+          && blockedUid != uid
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.keys().hasOnly([
+            "blockedUid",
+            "pseudo",
+            "photoUrl",
+            "profileIcon",
+            "createdAt"
+          ])
+          && isStringOrNull("pseudo")
+          && isStringOrNull("photoUrl")
+          && isStringOrNull("profileIcon")
+          && isTimestampOrNull("createdAt");
+        allow delete: if isSignedIn() && myUid() == uid;
+      }
+
+      match /contentFilters/{communityId}/hiddenMembers/{hiddenUid} {
+        allow read: if isSignedIn() && myUid() == uid;
+        allow create, update: if canUseVerifiedProfile()
+          && myUid() == uid
+          && hiddenUid != uid
+          && request.resource.data.uid == hiddenUid
+          && request.resource.data.keys().hasOnly([
+            "uid",
+            "pseudo",
+            "photoUrl",
+            "profileIcon",
+            "createdAt"
+          ])
+          && isStringOrNull("pseudo")
+          && isStringOrNull("photoUrl")
+          && isStringOrNull("profileIcon")
+          && isTimestampOrNull("createdAt");
+        allow delete: if isSignedIn() && myUid() == uid;
+      }
+
+      match /friends/{friendUid} {
+        allow read: if canUseVerifiedProfile();
+        allow create, update: if canUseVerifiedProfile()
+          && (myUid() == uid || myUid() == friendUid)
+          && request.resource.data.uid == friendUid
+          && request.resource.data.keys().hasOnly([
+            "uid",
+            "pseudo",
+            "photoUrl",
+            "profileIcon",
+            "createdAt"
+          ])
+          && isStringOrNull("pseudo")
+          && isStringOrNull("photoUrl")
+          && isStringOrNull("profileIcon")
+          && isTimestampOrNull("createdAt");
+        allow delete: if isSignedIn()
+          && (myUid() == uid || myUid() == friendUid);
+      }
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if canUseVerifiedProfile()
+        && (resource.data.fromUid == myUid() || resource.data.toUid == myUid());
+      allow create: if canUseVerifiedProfile()
+        && request.resource.data.fromUid == myUid()
+        && request.resource.data.toUid is string
+        && request.resource.data.toUid != myUid()
+        && request.resource.data.status == "pending"
+        && request.resource.data.keys().hasOnly([
+          "fromUid",
+          "fromPseudo",
+          "fromPhotoUrl",
+          "fromProfileIcon",
+          "toUid",
+          "toPseudo",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && isStringOrNull("fromPseudo")
+        && isStringOrNull("fromPhotoUrl")
+        && isStringOrNull("fromProfileIcon")
+        && isStringOrNull("toPseudo")
+        && isTimestampOrNull("createdAt")
+        && isTimestampOrNull("updatedAt");
+      allow update: if canUseVerifiedProfile()
+        && resource.data.toUid == myUid()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "status",
+          "updatedAt"
+        ])
+        && request.resource.data.status in ["accepted", "rejected"]
+        && isTimestampOrNull("updatedAt");
+      allow delete: if isSignedIn()
+        && (resource.data.fromUid == myUid() || resource.data.toUid == myUid());
     }
 
     match /pseudos/{pseudoKey} {
-      allow read: if isVerifiedEmail();
+      allow read: if isSignedIn();
 
-      allow create: if isVerifiedEmail()
+      allow create: if isSignedIn()
         && !exists(/databases/$(database)/documents/pseudos/$(pseudoKey))
         && isValidPseudoReservation();
 
@@ -525,6 +668,37 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if canUseVerifiedProfile()
         && resource.data.authorUid == myUid();
+    }
+
+    match /reports/{reportId} {
+      allow read: if isSignedIn()
+        && resource.data.reporterUid == myUid();
+      allow create: if canUseVerifiedProfile()
+        && request.resource.data.reporterUid == myUid()
+        && request.resource.data.keys().hasOnly([
+          "reporterUid",
+          "communityId",
+          "contentId",
+          "contentType",
+          "authorUid",
+          "authorPseudo",
+          "reason",
+          "details",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.contentId is string
+        && request.resource.data.contentType in ["message", "torpille", "reel", "profile"]
+        && request.resource.data.reason in ["harassment", "sexualContent", "violenceThreat", "hateSpeech", "spam", "unwantedContent", "other"]
+        && request.resource.data.status == "open"
+        && isStringOrNull("communityId")
+        && isStringOrNull("authorUid")
+        && isStringOrNull("authorPseudo")
+        && isStringOrNull("details")
+        && isTimestampOrNull("createdAt")
+        && isTimestampOrNull("updatedAt");
+      allow update, delete: if false;
     }
 
     match /communities/{communityId} {
@@ -549,7 +723,11 @@ service cloud.firestore {
       }
 
       match /banned/{uid} {
-        allow read: if isSignedIn() && isCommunityAdmin(communityId);
+        allow read: if isSignedIn()
+          && (
+            isCommunityAdmin(communityId)
+            || myUid() == uid
+          );
         allow create, update, delete: if isSignedIn() && isCommunityAdmin(communityId);
       }
 

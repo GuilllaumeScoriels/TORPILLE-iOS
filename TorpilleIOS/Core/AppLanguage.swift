@@ -148,6 +148,32 @@ final class AppLanguageService: ObservableObject {
         }
     }
 
+    func phrase(_ frenchText: String) -> String {
+        guard effectiveLanguage != .french && effectiveLanguage != .system else {
+            return frenchText
+        }
+
+        let catalog = phraseCatalog[effectiveLanguage] ?? phraseCatalog[.english] ?? [:]
+        return catalog[frenchText] ?? frenchText
+    }
+
+    func xpTotalLabel(_ xpTotal: Int64) -> String {
+        switch effectiveLanguage {
+        case .system, .french:
+            return "XP total : \(xpTotal)"
+        case .english:
+            return "Total XP: \(xpTotal)"
+        case .spanish:
+            return "XP total: \(xpTotal)"
+        case .german:
+            return "XP gesamt: \(xpTotal)"
+        case .italian:
+            return "XP totali: \(xpTotal)"
+        case .portuguese:
+            return "XP total: \(xpTotal)"
+        }
+    }
+
     func localizedResetPasswordInfo(for email: String) -> String {
         switch effectiveLanguage {
         case .system, .french:
@@ -360,6 +386,12 @@ final class AppLanguageService: ObservableObject {
         }
     }
 
+    func torpilleActionNotificationBody(from sender: String, to target: String) -> String {
+        let resolvedSender = sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? localizedSomeone() : sender
+        let resolvedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? localizedSomeone() : target
+        return "\(resolvedSender) a torpillé \(resolvedTarget)"
+    }
+
     private func localizedSomeone() -> String {
         switch effectiveLanguage {
         case .system, .french: return "Quelqu’un"
@@ -369,6 +401,130 @@ final class AppLanguageService: ObservableObject {
         case .italian: return "Qualcuno"
         case .portuguese: return "Alguém"
         }
+    }
+
+    private var phraseCatalog: [AppLanguage: [String: String]] {
+        [
+            .english: [
+                "Chargement…": "Loading...",
+                "Retour": "Back",
+                "Fermer": "Close",
+                "Annuler": "Cancel",
+                "Supprimer": "Delete",
+                "Envoyer": "Send",
+                "Créer": "Create",
+                "Création…": "Creating...",
+                "Galerie": "Gallery",
+                "Accueil": "Home",
+                "Communautés": "Communities",
+                "Profil": "Profile",
+                "Activité": "Activity",
+                "Réglages": "Settings",
+                "Préférences": "Preferences",
+                "Préférences par communauté": "Preferences by community",
+                "Choisir quand chaque communauté peut te notifier.": "Choose when each community can notify you.",
+                "Activité et demandes": "Activity and requests",
+                "Aucune notification": "No notifications",
+                "Les nouvelles notifications reçues apparaîtront ici.": "New notifications will appear here.",
+                "Tout lu": "Mark all read",
+                "Refuser": "Decline",
+                "Accepter": "Accept",
+                "veut devenir ami avec toi.": "wants to become friends with you.",
+                "Notifications": "Notifications",
+                "Aucune communauté": "No community",
+                "Rejoins ou crée une communauté pour configurer tes notifications.": "Join or create a community to configure your notifications.",
+                "Choisis si chaque communauté doit te notifier pour tous les contenus ou seulement quand tu es identifié·e.": "Choose whether each community notifies you for all content or only when you are tagged.",
+                "Créer une communauté": "Create a community",
+                "Classement global": "Global leaderboard",
+                "Dernière communauté": "Latest community",
+                "Communautés épinglées": "Pinned communities",
+                "Actions rapides": "Quick actions",
+                "Aucune communauté pour le moment.": "No community yet.",
+                "Crée ta première communauté pour commencer à jouer.": "Create your first community to start playing.",
+                "Publique": "Public",
+                "Privée": "Private",
+                "Public": "Public",
+                "Épinglée": "Pinned",
+                "Communauté publique": "Public community",
+                "Communauté privée": "Private community",
+                "Tes communautés": "Your communities",
+                "Créer une nouvelle communauté": "Create a new community",
+                "Informations publiques": "Public information",
+                "Ton pseudo et ta photo de profil sont visibles par les membres qui partagent une communauté avec toi.": "Your username and profile photo are visible to members who share a community with you.",
+                "Pseudo": "Username",
+                "Photo de profil": "Profile photo",
+                "Nombre d'amis": "Number of friends",
+                "Toujours public": "Always public",
+                "Optionnel": "Optional",
+                "Afficher ma langue": "Show my language",
+                "Afficher mon classement global": "Show my global ranking",
+                "Enregistrer la visibilité": "Save visibility",
+                "Amis": "Friends",
+                "rechercher par pseudo": "search by username",
+                "Utilisateurs bloqués": "Blocked users",
+                "Les utilisateurs bloqués disparaissent des communautés partagées, des fils et de la carte.": "Blocked users disappear from shared communities, feeds and the map.",
+                "Aucun utilisateur bloqué.": "No blocked users.",
+                "Débloquer": "Unblock",
+                "Supprimer ce compte ?": "Delete this account?",
+                "Cette action est définitive. Ton profil, tes préférences et tes communautés administrées seront supprimés.": "This action is final. Your profile, preferences and administered communities will be deleted.",
+                "Aucun ami pour le moment.": "No friends yet.",
+                "Mes amis": "My friends",
+                "Le nombre d'amis est toujours visible publiquement.": "The number of friends is always publicly visible.",
+                "Rechercher un pseudo": "Search a username",
+                "Ajouter": "Add",
+                "Rechercher un utilisateur": "Search for a user",
+                "Profil public": "Public profile",
+                "Envoyer une demande d'ami": "Send friend request",
+                "Langue": "Language",
+                "Filtres": "Filters",
+                "Joueurs": "Players",
+                "Aucun joueur": "No players",
+                "Le classement sera visible dès qu'il y aura des profils à comparer.": "The leaderboard will appear once there are profiles to compare.",
+                "Rejoins une ou plusieurs communautés pour filtrer le classement.": "Join one or more communities to filter the leaderboard.",
+                "Classement total activé": "Total leaderboard enabled",
+                "Revenir au classement total": "Return to total leaderboard",
+                "Nouvelle communauté": "New community",
+                "Crée un espace accueillant, règle son tempo et invite tes joueurs.": "Create a welcoming space, set its pace and invite your players.",
+                "Nom": "Name",
+                "Temps de réponse": "Response time",
+                "Heures": "Hours",
+                "Minutes": "Minutes",
+                "Valide les paramètres et ouvre la communauté.": "Confirm the settings and open the community.",
+                "Infos communauté": "Community info",
+                "Participants": "Participants",
+                "Paramètres": "Settings",
+                "Admin": "Admin",
+                "Signaler": "Report",
+                "Bloquer cet utilisateur": "Block this user",
+                "Masquer ce membre ici": "Hide this member here",
+                "Retirer de la communauté": "Remove from community",
+                "Bannir": "Ban",
+                "Contenus enregistres": "Saved content",
+                "Publier en Memories": "Publish to Memories",
+                "Retirer des Memories": "Remove from Memories",
+                "Aucun contenu enregistre": "No saved content",
+                "Torpilles non vues": "Unseen torpilles",
+                "Messages non vus": "Unread messages",
+                "Écrire un message…": "Write a message...",
+                "Qui veux-tu torpiller ?": "Who do you want to torpille?",
+                "Choisir la cible": "Choose target",
+                "Aucune torpille non vue": "No unseen torpille",
+                "Raison": "Reason",
+                "Contenu concerné": "Related content",
+                "Ajoute un contexte si nécessaire": "Add context if needed",
+                "Connectés il y a moins de 30 min": "Connected less than 30 min ago",
+                "Interprétation": "Interpretation",
+                "Message vocal": "Voice message",
+                "Lire": "Play",
+                "Photo": "Photo",
+                "Ouvrir": "Open",
+                "Emoji personnalisé": "Custom emoji",
+                "Retirer la photo sélectionnée": "Remove selected photo",
+                "Formats recommandés : JPG ou PNG.": "Recommended formats: JPG or PNG."
+                ,
+                "Utilisateur": "User"
+            ]
+        ]
     }
 
     private func french(_ key: AppTextKey) -> String {
@@ -396,8 +552,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Publier aussi dans Memories"
         case .publishedBadge: return "Publié"
         case .appLanguage: return "Langue de l'application"
-        case .authWelcomeTitle: return "Bienvenue sur Torpille"
-        case .authWelcomeSubtitle: return "Connecte-toi ou crée ton compte et repars directement dans l'action."
+        case .authWelcomeTitle: return "Bienvenue dans tes communautés privées"
+        case .authWelcomeSubtitle: return "Torpille relie des membres identifiés dans des communautés choisies, avec modération, blocage et signalement."
         case .authSectionTitle: return "Connexion"
         case .authSectionSubtitle: return "Entre tes identifiants pour rejoindre tes communautés."
         case .authEmailPlaceholder: return "Email"
@@ -410,7 +566,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Reçois un email pour reprendre l'accès à ton compte."
         case .authLoading: return "Chargement…"
         case .profileSetupTitle: return "Crée ton profil"
-        case .profileSetupSubtitle: return "Ajoute une photo, choisis un pseudo et rends ton arrivée plus fun dès le premier écran."
+        case .profileSetupSubtitle: return "Ajoute un pseudo et un avatar visibles pour échanger sans anonymat avec les membres de tes communautés."
         case .profileEmail: return "Email"
         case .profilePseudoPlaceholder: return "Pseudo"
         case .profileContinue: return "Continuer"
@@ -445,8 +601,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Also publish to Memories"
         case .publishedBadge: return "Published"
         case .appLanguage: return "App language"
-        case .authWelcomeTitle: return "Welcome to Torpille"
-        case .authWelcomeSubtitle: return "Sign in or create your account and jump straight back into the action."
+        case .authWelcomeTitle: return "Welcome to your private communities"
+        case .authWelcomeSubtitle: return "Torpille connects identified members inside chosen communities, with moderation, blocking, and reporting."
         case .authSectionTitle: return "Sign in"
         case .authSectionSubtitle: return "Enter your credentials to join your communities."
         case .authEmailPlaceholder: return "Email"
@@ -459,7 +615,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Receive an email to recover access to your account."
         case .authLoading: return "Loading…"
         case .profileSetupTitle: return "Create your profile"
-        case .profileSetupSubtitle: return "Add a photo, choose a username and make your arrival fun from the very first screen."
+        case .profileSetupSubtitle: return "Add a visible username and avatar so community members are not anonymous."
         case .profileEmail: return "Email"
         case .profilePseudoPlaceholder: return "Username"
         case .profileContinue: return "Continue"
@@ -494,8 +650,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Publicar también en Memories"
         case .publishedBadge: return "Publicado"
         case .appLanguage: return "Idioma de la app"
-        case .authWelcomeTitle: return "Bienvenido a Torpille"
-        case .authWelcomeSubtitle: return "Inicia sesión o crea tu cuenta y vuelve directamente a la acción."
+        case .authWelcomeTitle: return "Bienvenido a tus comunidades privadas"
+        case .authWelcomeSubtitle: return "Torpille conecta miembros identificados dentro de comunidades elegidas, con moderación, bloqueo y reportes."
         case .authSectionTitle: return "Conexión"
         case .authSectionSubtitle: return "Introduce tus credenciales para unirte a tus comunidades."
         case .authEmailPlaceholder: return "Correo electrónico"
@@ -508,7 +664,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Recibe un correo para recuperar el acceso a tu cuenta."
         case .authLoading: return "Cargando…"
         case .profileSetupTitle: return "Crea tu perfil"
-        case .profileSetupSubtitle: return "Añade una foto, elige un apodo y haz tu llegada más divertida desde la primera pantalla."
+        case .profileSetupSubtitle: return "Añade un apodo y un avatar visibles para evitar perfiles anónimos en tus comunidades."
         case .profileEmail: return "Correo electrónico"
         case .profilePseudoPlaceholder: return "Apodo"
         case .profileContinue: return "Continuar"
@@ -543,8 +699,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Auch in Memories veröffentlichen"
         case .publishedBadge: return "Veröffentlicht"
         case .appLanguage: return "App-Sprache"
-        case .authWelcomeTitle: return "Willkommen bei Torpille"
-        case .authWelcomeSubtitle: return "Melde dich an oder erstelle dein Konto und starte direkt wieder ins Geschehen."
+        case .authWelcomeTitle: return "Willkommen in deinen privaten Communities"
+        case .authWelcomeSubtitle: return "Torpille verbindet identifizierte Mitglieder in ausgewählten Communities, mit Moderation, Blockieren und Melden."
         case .authSectionTitle: return "Anmeldung"
         case .authSectionSubtitle: return "Gib deine Zugangsdaten ein, um deinen Communitys beizutreten."
         case .authEmailPlaceholder: return "E-Mail"
@@ -557,7 +713,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Erhalte eine E-Mail, um wieder Zugriff auf dein Konto zu bekommen."
         case .authLoading: return "Lädt…"
         case .profileSetupTitle: return "Erstelle dein Profil"
-        case .profileSetupSubtitle: return "Füge ein Foto hinzu, wähle einen Nutzernamen und mach deinen Start schon auf dem ersten Bildschirm persönlicher."
+        case .profileSetupSubtitle: return "Füge einen sichtbaren Nutzernamen und Avatar hinzu, damit Community-Mitglieder nicht anonym bleiben."
         case .profileEmail: return "E-Mail"
         case .profilePseudoPlaceholder: return "Benutzername"
         case .profileContinue: return "Weiter"
@@ -592,8 +748,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Pubblica anche in Memories"
         case .publishedBadge: return "Pubblicato"
         case .appLanguage: return "Lingua dell'app"
-        case .authWelcomeTitle: return "Benvenuto su Torpille"
-        case .authWelcomeSubtitle: return "Accedi o crea il tuo account e torna subito nell'azione."
+        case .authWelcomeTitle: return "Benvenuto nelle tue comunità private"
+        case .authWelcomeSubtitle: return "Torpille collega membri identificati in comunità scelte, con moderazione, blocco e segnalazioni."
         case .authSectionTitle: return "Accesso"
         case .authSectionSubtitle: return "Inserisci le tue credenziali per entrare nelle tue community."
         case .authEmailPlaceholder: return "Email"
@@ -606,7 +762,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Ricevi un'email per recuperare l'accesso al tuo account."
         case .authLoading: return "Caricamento…"
         case .profileSetupTitle: return "Crea il tuo profilo"
-        case .profileSetupSubtitle: return "Aggiungi una foto, scegli un nome utente e rendi il tuo arrivo più divertente fin dalla prima schermata."
+        case .profileSetupSubtitle: return "Aggiungi un nome utente e un avatar visibili per evitare profili anonimi nelle comunità."
         case .profileEmail: return "Email"
         case .profilePseudoPlaceholder: return "Nome utente"
         case .profileContinue: return "Continua"
@@ -641,8 +797,8 @@ final class AppLanguageService: ObservableObject {
         case .publishToReels: return "Publicar também em Memories"
         case .publishedBadge: return "Publicado"
         case .appLanguage: return "Idioma do app"
-        case .authWelcomeTitle: return "Bem-vindo ao Torpille"
-        case .authWelcomeSubtitle: return "Entre ou crie sua conta e volte direto para a ação."
+        case .authWelcomeTitle: return "Bem-vindo às suas comunidades privadas"
+        case .authWelcomeSubtitle: return "Torpille conecta membros identificados em comunidades escolhidas, com moderação, bloqueio e denúncias."
         case .authSectionTitle: return "Entrar"
         case .authSectionSubtitle: return "Digite suas credenciais para entrar nas suas comunidades."
         case .authEmailPlaceholder: return "Email"
@@ -655,7 +811,7 @@ final class AppLanguageService: ObservableObject {
         case .authForgotPasswordSubtitle: return "Receba um email para recuperar o acesso à sua conta."
         case .authLoading: return "Carregando…"
         case .profileSetupTitle: return "Crie seu perfil"
-        case .profileSetupSubtitle: return "Adicione uma foto, escolha um nome e torne sua chegada mais divertida desde a primeira tela."
+        case .profileSetupSubtitle: return "Adicione um nome e avatar visíveis para evitar perfis anônimos nas comunidades."
         case .profileEmail: return "Email"
         case .profilePseudoPlaceholder: return "Apelido"
         case .profileContinue: return "Continuar"

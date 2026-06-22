@@ -129,11 +129,10 @@ final class AppRootViewModel: ObservableObject {
 
         do {
             let me = try await env.userRepository.getMeOrThrow()
-            let hasPseudo = !me.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if let communityId = pendingJoinCommunityId, hasPseudo {
+            if let communityId = pendingJoinCommunityId, me.hasRequiredIdentity {
                 route = .join(communityId)
             } else {
-                route = hasPseudo ? .home : .profile
+                route = me.hasRequiredIdentity ? .home : .profile
             }
         } catch {
             route = isMissingProfileError(error) ? .profile : .auth
@@ -164,9 +163,7 @@ final class AppRootViewModel: ObservableObject {
 
         do {
             let me = try await env.userRepository.getMeOrThrow()
-            let pseudo = me.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if pseudo.isEmpty {
+            if !me.hasRequiredIdentity {
                 route = .profile
             } else {
                 route = .join(communityId)
@@ -306,6 +303,8 @@ final class ProfileViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var error: String?
     @Published var selectedPhotoData: Data?
+    @Published var selectedProfileIcon = "🎯"
+    @Published var acceptsTerms = false
     
     private let repo: UserRepository
     private let authRepository: AuthRepository
@@ -319,16 +318,25 @@ final class ProfileViewModel: ObservableObject {
         self.authRepository = authRepository
     }
 
+    var canSubmitProfile: Bool {
+        !pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (selectedPhotoData != nil || !selectedProfileIcon.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && acceptsTerms
+    }
+
     func save(onDone: @escaping () -> Void) {
         error = nil
+        guard canSubmitProfile else {
+            error = "Complète ton pseudo, choisis un avatar et accepte les règles pour continuer."
+            return
+        }
         isSaving = true
         Task {
             defer { isSaving = false }
             do {
-                try await repo.updateProfile(pseudo: pseudo, imageData: selectedPhotoData, profileIcon: nil)
+                try await repo.updateProfile(pseudo: pseudo, imageData: selectedPhotoData, profileIcon: selectedPhotoData == nil ? selectedProfileIcon : nil)
                 let me = try await repo.getMeOrThrow()
-                let trimmedPseudo = me.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmedPseudo.isEmpty else {
+                guard me.hasRequiredIdentity else {
                     throw TorpilleError.missingData("Le profil a été enregistré mais reste incomplet.")
                 }
                 onDone()
@@ -346,6 +354,10 @@ final class HomeViewModel: ObservableObject {
     @Published var error: String?
     @Published var infoMessage: String?
     @Published var isDeletingAccount = false
+    @Published var blockedUsers: [BlockedUser] = []
+    @Published var friends: [PublicFriend] = []
+    @Published var friendSearchResults: [UserProfile] = []
+    @Published var isSearchingFriends = false
 
     private let authRepository: AuthRepository
     private let userRepository: UserRepository
@@ -353,6 +365,8 @@ final class HomeViewModel: ObservableObject {
     private let languageService: AppLanguageService
     private var meRegistration: ListenerRegistration?
     private var communitiesRegistration: ListenerRegistration?
+    private var blockedUsersRegistration: ListenerRegistration?
+    private var friendsRegistration: ListenerRegistration?
 
     init(authRepository: AuthRepository, userRepository: UserRepository, communityRepository: CommunityRepository, languageService: AppLanguageService) {
         self.authRepository = authRepository
@@ -401,6 +415,12 @@ final class HomeViewModel: ObservableObject {
         communitiesRegistration = communityRepository.observeCommunitiesForMe { [weak self] values in
             DispatchQueue.main.async { self?.communities = values }
         }
+        blockedUsersRegistration = communityRepository.observeBlockedUsers { [weak self] values in
+            DispatchQueue.main.async { self?.blockedUsers = values }
+        }
+        friendsRegistration = userRepository.observeFriends { [weak self] values in
+            DispatchQueue.main.async { self?.friends = values }
+        }
 
         Task {
             do {
@@ -428,6 +448,53 @@ final class HomeViewModel: ObservableObject {
         } catch {
             self.error = debugErrorMessage(error)
             return false
+        }
+    }
+
+    func savePublicSettings(languageCode: String?, isLanguagePublic: Bool, isLeaderboardPublic: Bool) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await userRepository.updatePublicProfileSettings(
+                    languageCode: languageCode,
+                    isLanguagePublic: isLanguagePublic,
+                    isLeaderboardPublic: isLeaderboardPublic
+                )
+                infoMessage = "Préférences publiques enregistrées."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func searchFriends(query: String) {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 2 else {
+            friendSearchResults = []
+            return
+        }
+        isSearchingFriends = true
+        Task {
+            defer { isSearchingFriends = false }
+            do {
+                friendSearchResults = try await userRepository.searchUsersByPseudo(clean)
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func sendFriendRequest(to profile: UserProfile) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await userRepository.sendFriendRequest(to: profile)
+                infoMessage = "Demande d'ami envoyée à @\(profile.pseudo)."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
         }
     }
 
@@ -482,6 +549,19 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    func unblockUser(_ blockedUser: BlockedUser) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await communityRepository.unblockUser(blockedUser.id)
+                infoMessage = "@\(blockedUser.pseudo) a été débloqué."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
     func togglePinnedCommunity(_ community: Community) {
         error = nil
         infoMessage = nil
@@ -524,6 +604,8 @@ final class HomeViewModel: ObservableObject {
     deinit {
         meRegistration?.remove()
         communitiesRegistration?.remove()
+        blockedUsersRegistration?.remove()
+        friendsRegistration?.remove()
     }
 }
 
@@ -549,6 +631,15 @@ enum HomeCommunityPresentation {
     }
 }
 
+enum LeaderboardXP {
+    static func displayedXP(for player: UserProfile, selectedCommunityIds: Set<String>) -> Int64 {
+        guard !selectedCommunityIds.isEmpty else { return player.effectiveTotalXP }
+        return selectedCommunityIds.reduce(into: Int64(0)) { partial, communityId in
+            partial += player.communityXP[communityId] ?? 0
+        }
+    }
+}
+
 @MainActor
 final class GlobalLeaderboardViewModel: ObservableObject {
     @Published var players: [UserProfile] = []
@@ -561,9 +652,7 @@ final class GlobalLeaderboardViewModel: ObservableObject {
     private let communityRepository: CommunityRepository
     private var leaderboardRegistration: ListenerRegistration?
     private var communitiesRegistration: ListenerRegistration?
-    private var memberRegistrations: [String: ListenerRegistration] = [:]
     private var allPlayers: [UserProfile] = []
-    private var memberUIDsByCommunity: [String: Set<String>] = [:]
 
     init(repo: UserRepository, authRepository: AuthRepository, communityRepository: CommunityRepository) {
         self.repo = repo
@@ -596,8 +685,6 @@ final class GlobalLeaderboardViewModel: ObservableObject {
     func start() {
         leaderboardRegistration?.remove()
         communitiesRegistration?.remove()
-        removeMemberListeners()
-        memberUIDsByCommunity = [:]
 
         currentUserId = authRepository.currentUID
 
@@ -614,7 +701,6 @@ final class GlobalLeaderboardViewModel: ObservableObject {
                 self.availableCommunities = values
                 let validIds = Set(values.map(\.stableId))
                 self.selectedCommunityIds = self.selectedCommunityIds.intersection(validIds)
-                self.updateMemberListeners()
                 self.refreshPlayers()
             }
         }
@@ -641,65 +727,46 @@ final class GlobalLeaderboardViewModel: ObservableObject {
         } else {
             selectedCommunityIds.insert(communityId)
         }
-        updateMemberListeners()
         refreshPlayers()
     }
 
     func clearCommunityFilters() {
         selectedCommunityIds.removeAll()
-        updateMemberListeners()
         refreshPlayers()
-    }
-
-    private func updateMemberListeners() {
-        let desiredIds = selectedCommunityIds
-        let currentIds = Set(memberRegistrations.keys)
-
-        let idsToRemove = currentIds.subtracting(desiredIds)
-        for communityId in idsToRemove {
-            memberRegistrations[communityId]?.remove()
-            memberRegistrations.removeValue(forKey: communityId)
-            memberUIDsByCommunity.removeValue(forKey: communityId)
-        }
-
-        let idsToAdd = desiredIds.subtracting(currentIds)
-        for communityId in idsToAdd {
-            let registration = communityRepository.observeMembers(communityId) { [weak self] members in
-                DispatchQueue.main.async {
-                    self?.memberUIDsByCommunity[communityId] = Set(members.map(\.uid).filter { !$0.isEmpty })
-                    self?.refreshPlayers()
-                }
-            }
-            memberRegistrations[communityId] = registration
-        }
     }
 
     private func refreshPlayers() {
         guard hasActiveCommunityFilter else {
-            players = allPlayers
+            players = allPlayers.sorted { lhs, rhs in
+                if lhs.effectiveTotalXP != rhs.effectiveTotalXP {
+                    return lhs.effectiveTotalXP > rhs.effectiveTotalXP
+                }
+                return lhs.pseudo.localizedCaseInsensitiveCompare(rhs.pseudo) == .orderedAscending
+            }
             return
         }
 
-        let allowedUIDs = memberUIDsByCommunity.values.reduce(into: Set<String>()) { partialResult, value in
-            partialResult.formUnion(value)
-        }
-
-        players = allPlayers.filter { allowedUIDs.contains($0.uid) }
+        players = allPlayers
+            .filter { profile in
+                !selectedCommunityIds.isDisjoint(with: Set(profile.communityIds))
+            }
+            .sorted { lhs, rhs in
+                let lhsXP = displayedXP(for: lhs)
+                let rhsXP = displayedXP(for: rhs)
+                if lhsXP != rhsXP {
+                    return lhsXP > rhsXP
+                }
+                return lhs.pseudo.localizedCaseInsensitiveCompare(rhs.pseudo) == .orderedAscending
+            }
     }
 
-    private func removeMemberListeners() {
-        for registration in memberRegistrations.values {
-            registration.remove()
-        }
-        memberRegistrations.removeAll()
+    func displayedXP(for player: UserProfile) -> Int64 {
+        LeaderboardXP.displayedXP(for: player, selectedCommunityIds: selectedCommunityIds)
     }
 
     deinit {
         leaderboardRegistration?.remove()
         communitiesRegistration?.remove()
-        for registration in memberRegistrations.values {
-            registration.remove()
-        }
     }
 }
 
@@ -868,6 +935,32 @@ final class CommunityInfoViewModel: ObservableObject {
             do {
                 try await repo.banMember(communityId: communityId, member: member)
                 infoMessage = "@\(member.displayName) a ete banni."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func hideContentFromMember(communityId: String, member: Member) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await repo.hideMemberContent(communityId: communityId, member: member)
+                infoMessage = "Les contenus de @\(member.displayName) sont masqués dans cette communauté."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func blockMember(_ member: Member) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await repo.blockUser(member)
+                infoMessage = "@\(member.displayName) a été bloqué."
             } catch {
                 self.error = debugErrorMessage(error)
             }
@@ -1212,6 +1305,55 @@ final class CommunityViewModel: ObservableObject {
         }
     }
 
+    func reportMessage(communityId: String, message: Message, reason: ReportReason, details: String) {
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await communityRepo.reportContent(
+                    communityId: communityId,
+                    contentId: message.stableId,
+                    contentType: .message,
+                    authorUid: message.senderUid,
+                    authorPseudo: message.senderPseudo,
+                    reason: reason,
+                    details: details
+                )
+                infoMessage = "Signalement envoyé. Notre équipe vérifie la situation."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func hideContentFromSender(communityId: String, message: Message) {
+        guard let member = members.first(where: { $0.uid == message.senderUid }) else { return }
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await communityRepo.hideMemberContent(communityId: communityId, member: member)
+                infoMessage = "Les contenus de @\(member.displayName) sont masqués dans cette communauté."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
+    func blockSender(message: Message) {
+        guard let member = members.first(where: { $0.uid == message.senderUid }) else { return }
+        error = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await communityRepo.blockUser(member)
+                infoMessage = "@\(member.displayName) a été bloqué."
+            } catch {
+                self.error = debugErrorMessage(error)
+            }
+        }
+    }
+
     func resolvePlaybackURL(for message: Message) async throws -> URL {
         if message.type == "audio", let directURL = message.audioUrl, let url = URL(string: directURL) {
             return url
@@ -1369,6 +1511,8 @@ final class ReelsViewModel: ObservableObject {
     @Published var reels: [PublishedReel] = []
     @Published var error: String?
     @Published var infoMessage: String?
+    @Published var selectedPublicProfile: UserProfile?
+    @Published var isLoadingPublicProfile = false
 
     private let repo: CommunityRepository
     private var registration: ListenerRegistration?
@@ -1415,6 +1559,34 @@ final class ReelsViewModel: ObservableObject {
             }
         }
         throw TorpilleError.videoNotAvailable
+    }
+
+    func openPublicProfile(for reel: PublishedReel) {
+        error = nil
+        isLoadingPublicProfile = true
+        Task {
+            defer { isLoadingPublicProfile = false }
+            do {
+                selectedPublicProfile = try await repo.publicUserProfile(uid: reel.authorUid)
+            } catch {
+                selectedPublicProfile = UserProfile(
+                    uid: reel.authorUid,
+                    email: "",
+                    pseudo: reel.authorPseudo,
+                    pseudoKey: "",
+                    photoUrl: reel.authorPhotoUrl,
+                    profileIcon: reel.authorProfileIcon,
+                    communityIds: [],
+                    pinnedCommunityIds: [],
+                    communityXP: [:],
+                    xpTotal: 0,
+                    fcmToken: nil,
+                    termsAcceptedAt: nil,
+                    moderationRulesAcceptedAt: nil,
+                    updatedAt: nil
+                )
+            }
+        }
     }
 
     deinit {

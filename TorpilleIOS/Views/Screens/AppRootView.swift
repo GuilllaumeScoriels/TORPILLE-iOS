@@ -33,7 +33,7 @@ struct AppRootView: View {
             Group {
                 switch viewModel.route {
                 case .splash:
-                    ProgressView("Chargement…")
+                    ProgressView(languageService.phrase("Chargement…"))
                         .task { await viewModel.bootstrap() }
                 case .auth:
                     AuthScreen(onSignedIn: {
@@ -75,7 +75,7 @@ struct AppRootView: View {
                 case .communityInfo(let communityId):
                     CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) })
                 case .globalLeaderboard:
-                    GlobalLeaderboardScreen(env: viewModel.env)
+                    GlobalLeaderboardScreen(env: viewModel.env, onBack: { viewModel.route = .home })
                 case .notificationCenter:
                     NotificationCenterScreen(env: viewModel.env, onBack: { viewModel.route = .home })
                 }
@@ -99,6 +99,7 @@ struct AppRootView: View {
             viewModel.openNotificationCenter()
         }
         .environment(\.locale, languageService.locale)
+        .environmentObject(languageService)
     }
 }
 
@@ -111,6 +112,7 @@ struct MainTabView: View {
     let onSignOut: () -> Void
     @ObservedObject private var languageService: AppLanguageService
     @State private var selectedTab = 0
+    @State private var isShowingProfileSheet = false
 
     init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void, onOpenMemories: @escaping () -> Void, onOpenNotificationCenter: @escaping () -> Void, onSignOut: @escaping () -> Void) {
         self.env = env
@@ -125,7 +127,7 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             HomeScreen(env: env, onCreateCommunity: onCreateCommunity, onOpenCommunity: onOpenCommunity, onOpenMemories: onOpenMemories, onOpenProfile: {
-                selectedTab = 2
+                isShowingProfileSheet = true
             }, onOpenNotificationCenter: onOpenNotificationCenter, onOpenGlobalLeaderboard: {
                 selectedTab = 3
             }, onSignOut: onSignOut)
@@ -153,6 +155,27 @@ struct MainTabView: View {
         .toolbarBackground(Color.white, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .toolbarColorScheme(.light, for: .tabBar)
+        .sheet(isPresented: $isShowingProfileSheet) {
+            NavigationStack {
+                UserProfileScreen(
+                    env: env,
+                    onEditProfile: {},
+                    onOpenGlobalLeaderboard: {
+                        isShowingProfileSheet = false
+                        selectedTab = 3
+                    },
+                    onSignOut: {
+                        isShowingProfileSheet = false
+                        onSignOut()
+                    },
+                    onBack: {
+                        isShowingProfileSheet = false
+                    }
+                )
+            }
+            .presentationDragIndicator(.visible)
+        }
         .environment(\.locale, languageService.locale)
+        .environmentObject(languageService)
     }
 }

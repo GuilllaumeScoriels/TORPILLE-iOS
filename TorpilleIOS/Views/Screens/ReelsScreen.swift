@@ -6,6 +6,7 @@ struct ReelsScreen: View {
     let onBack: (() -> Void)?
 
     @State private var playbackURL: URL?
+    @State private var playbackReel: PublishedReel?
     @State private var playbackTitle: String?
 
     init(env: AppEnvironment, onBack: (() -> Void)? = nil) {
@@ -94,8 +95,27 @@ struct ReelsScreen: View {
         }, set: { newValue in
             playbackURL = newValue?.url
             playbackTitle = newValue?.title
+            if newValue == nil {
+                playbackReel = nil
+            }
         })) { item in
-            VideoPlayerSheet(url: item.url, mediaType: .video, overlayText: item.title, tagX: nil, tagY: nil)
+            VideoPlayerSheet(
+                url: item.url,
+                mediaType: .video,
+                overlayText: item.title,
+                authorPseudo: playbackReel?.authorPseudo,
+                authorPhotoUrl: playbackReel?.authorPhotoUrl,
+                authorProfileIcon: playbackReel?.authorProfileIcon,
+                tagX: nil,
+                tagY: nil,
+                onAuthorTap: {
+                    guard let playbackReel else { return }
+                    openAuthorProfileAfterClosingPlayback(playbackReel)
+                }
+            )
+        }
+        .sheet(item: $vm.selectedPublicProfile) { profile in
+            PublicProfileSheet(profile: profile)
         }
     }
 
@@ -165,9 +185,64 @@ struct ReelsScreen: View {
     private func open(_ reel: PublishedReel) async {
         do {
             playbackURL = try await vm.resolvePlaybackURL(for: reel)
+            playbackReel = reel
             playbackTitle = reel.taggedPseudo
         } catch {
             vm.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func openAuthorProfileAfterClosingPlayback(_ reel: PublishedReel) {
+        playbackURL = nil
+        playbackReel = nil
+        playbackTitle = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            vm.openPublicProfile(for: reel)
+        }
+    }
+}
+
+private struct PublicProfileSheet: View {
+    let profile: UserProfile
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                if let icon = profile.profileIcon,
+                   profile.photoUrl?.isEmpty != false,
+                   !icon.isEmpty {
+                    EmojiAvatarView(profileIcon: icon, size: 104)
+                } else {
+                    ProfileAvatarImageView(
+                        imageData: nil,
+                        photoURL: profile.photoUrl,
+                        fallbackSymbol: "person.fill",
+                        size: 104
+                    )
+                }
+
+                Text("@\(profile.pseudo)")
+                    .font(.title2.weight(.bold))
+
+                if !profile.communityIds.isEmpty {
+                    Text("\(profile.communityIds.count) communauté\(profile.communityIds.count > 1 ? "s" : "") partagée\(profile.communityIds.count > 1 ? "s" : "") ou rejointe\(profile.communityIds.count > 1 ? "s" : "")")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .navigationTitle("Profil public")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
         }
     }
 }

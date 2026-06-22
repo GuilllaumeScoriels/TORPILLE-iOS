@@ -457,6 +457,7 @@ final class VideoTransferService {
 @MainActor
 final class NotificationCenterService: NSObject, ObservableObject {
     @Published private(set) var items: [AppNotificationItem] = []
+    @Published private(set) var friendRequests: [FriendRequest] = []
     @Published private(set) var communities: [Community] = []
     @Published private(set) var preferencesByCommunityId: [String: CommunityNotificationPreference] = [:]
     @Published var navigationTarget: String?
@@ -472,6 +473,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
     private var messageRegistrations: [String: ListenerRegistration] = [:]
     private var torpilleRegistrations: [String: ListenerRegistration] = [:]
     private var preferenceRegistrations: [String: ListenerRegistration] = [:]
+    private var friendRequestsRegistration: ListenerRegistration?
     private var initialMessageIdsByCommunity: [String: Set<String>] = [:]
     private var initialTorpilleIdsByCommunity: [String: Set<String>] = [:]
     private var startedUID: String?
@@ -526,6 +528,16 @@ final class NotificationCenterService: NSObject, ObservableObject {
                 self.attachListeners(to: values)
             }
         }
+
+        friendRequestsRegistration = db.collection("friendRequests")
+            .whereField("toUid", isEqualTo: uid)
+            .whereField("status", isEqualTo: FriendRequestStatus.pending.rawValue)
+            .addSnapshotListener { [weak self] snapshot, _ in
+                let values = snapshot?.documents.compactMap { try? $0.data(as: FriendRequest.self) } ?? []
+                DispatchQueue.main.async {
+                    self?.friendRequests = values.sorted { ($0.createdAt?.dateValue() ?? .distantPast) > ($1.createdAt?.dateValue() ?? .distantPast) }
+                }
+            }
     }
 
     func stop() {
@@ -549,9 +561,12 @@ final class NotificationCenterService: NSObject, ObservableObject {
         messageRegistrations.values.forEach { $0.remove() }
         torpilleRegistrations.values.forEach { $0.remove() }
         preferenceRegistrations.values.forEach { $0.remove() }
+        friendRequestsRegistration?.remove()
         messageRegistrations.removeAll()
         torpilleRegistrations.removeAll()
         preferenceRegistrations.removeAll()
+        friendRequestsRegistration = nil
+        friendRequests = []
         initialMessageIdsByCommunity.removeAll()
         initialTorpilleIdsByCommunity.removeAll()
     }
@@ -686,9 +701,11 @@ final class NotificationCenterService: NSObject, ObservableObject {
         guard !myUID.isEmpty, message.senderUid != myUID else { return }
 
         let preference = preference(for: community)
-        guard preference.mode == .all else {
-            return
-        }
+        let taggedUid = message.taggedUid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isExplicitlyIdentified = taggedUid == myUID
+        let isTorpilleMessage = message.torpilleId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        guard shouldNotify(preference: preference, isExplicitlyIdentified: isExplicitlyIdentified) else { return }
+        if isTorpilleMessage && isExplicitlyIdentified { return }
 
         let item = AppNotificationItem(
             id: "message_\(message.stableId)",
@@ -707,22 +724,33 @@ final class NotificationCenterService: NSObject, ObservableObject {
         guard !myUID.isEmpty, torpille.fromUid != myUID, torpille.toUid == myUID else { return }
 
         let preference = preference(for: community)
-        guard preference.mode == .mentionsOnly else { return }
+        guard shouldNotify(preference: preference, isExplicitlyIdentified: true) else { return }
 
         let senderPseudo = torpille.fromPseudo?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetPseudo = torpille.taggedPseudo?.trimmingCharacters(in: .whitespacesAndNewlines)
         let sender = (senderPseudo?.isEmpty == false) ? senderPseudo! : ""
-        let body = languageService.localizedTorpilleNotificationBody(from: sender)
+        let target = (targetPseudo?.isEmpty == false) ? targetPseudo! : ""
+        let body = languageService.torpilleActionNotificationBody(from: sender, to: target)
 
         let item = AppNotificationItem(
             id: "torpille_\(torpille.stableId)",
             communityId: community.stableId,
             communityName: community.name,
-            title: community.name,
+            title: body,
             body: body,
             createdAt: torpille.createdAt?.dateValue() ?? Date(),
             isRead: false
         )
         insert(item)
+    }
+
+    private func shouldNotify(preference: CommunityNotificationPreference, isExplicitlyIdentified: Bool) -> Bool {
+        switch preference.mode {
+        case .all:
+            return true
+        case .mentionsOnly:
+            return isExplicitlyIdentified
+        }
     }
 
     private func messageNotificationBody(for message: Message) -> String {
@@ -810,6 +838,28 @@ final class NotificationCenterService: NSObject, ObservableObject {
         applyBadgeCount()
         notificationCenter.removePendingNotificationRequests(withIdentifiers: [itemId])
         notificationCenter.removeDeliveredNotifications(withIdentifiers: [itemId])
+    }
+
+    func acceptFriendRequest(_ request: FriendRequest) {
+        Task {
+            do {
+                try await userRepository.acceptFriendRequest(request)
+                friendRequests.removeAll { $0.id == request.id }
+            } catch {
+                print("⚠️ acceptFriendRequest failed:", error)
+            }
+        }
+    }
+
+    func rejectFriendRequest(_ request: FriendRequest) {
+        Task {
+            do {
+                try await userRepository.rejectFriendRequest(request)
+                friendRequests.removeAll { $0.id == request.id }
+            } catch {
+                print("⚠️ rejectFriendRequest failed:", error)
+            }
+        }
     }
 
     func updatePreference(for community: Community, mode: CommunityNotificationMode) {

@@ -43,6 +43,7 @@ enum ActionAccent {
 }
 
 struct WelcomeHeroCard: View {
+    @EnvironmentObject private var languageService: AppLanguageService
     let title: String
     let subtitle: String?
     let primarySymbol: String
@@ -53,14 +54,14 @@ struct WelcomeHeroCard: View {
     var body: some View {
         HStack(alignment: .center, spacing: 18) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(title)
+                Text(languageService.phrase(title))
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
+                    Text(languageService.phrase(subtitle))
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.92))
                         .multilineTextAlignment(.leading)
@@ -123,6 +124,7 @@ struct WelcomeHeroCard: View {
 
 
 struct ProfileHeroBanner: View {
+    @EnvironmentObject private var languageService: AppLanguageService
     let title: String
     let pseudo: String
     let xpTotal: Int64
@@ -144,7 +146,7 @@ struct ProfileHeroBanner: View {
             .shadow(color: .black.opacity(0.14), radius: 8, x: 0, y: 4)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(title)
+                Text(languageService.phrase(title))
                     .font(.system(.title3, design: .rounded, weight: .bold))
                     .foregroundStyle(.white.opacity(0.96))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,7 +157,7 @@ struct ProfileHeroBanner: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Label("XP total : \(xpTotal)", systemImage: "star.fill")
+                Label(languageService.xpTotalLabel(xpTotal), systemImage: "star.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.96))
                     .padding(.horizontal, 12)
@@ -180,11 +182,12 @@ struct ProfileHeroBanner: View {
 
     private var pseudoDisplay: String {
         let trimmedPseudo = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedPseudo.isEmpty ? "Utilisateur" : "@\(trimmedPseudo)"
+        return trimmedPseudo.isEmpty ? languageService.phrase("Utilisateur") : "@\(trimmedPseudo)"
     }
 }
 
 struct IllustratedActionButton: View {
+    @EnvironmentObject private var languageService: AppLanguageService
     let title: String
     let subtitle: String?
     let systemImage: String
@@ -212,12 +215,12 @@ struct IllustratedActionButton: View {
             if hasTextContent {
                 VStack(alignment: .leading, spacing: 6) {
                     if !title.isEmpty {
-                        Text(title)
+                        Text(languageService.phrase(title))
                             .font(.headline)
                             .foregroundStyle(.white)
                     }
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
+                        Text(languageService.phrase(subtitle))
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.92))
                             .multilineTextAlignment(.leading)
@@ -228,7 +231,7 @@ struct IllustratedActionButton: View {
             Spacer(minLength: 10)
 
             if let trailingText, !trailingText.isEmpty {
-                Text(trailingText)
+                Text(languageService.phrase(trailingText))
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
@@ -254,6 +257,7 @@ struct IllustratedActionButton: View {
 }
 
 struct CompactActionButton: View {
+    @EnvironmentObject private var languageService: AppLanguageService
     let title: String
     let systemImage: String
     let accent: ActionAccent
@@ -266,7 +270,7 @@ struct CompactActionButton: View {
                 .frame(width: 34, height: 34)
                 .background(.white.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text(title)
+            Text(languageService.phrase(title))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
             Spacer(minLength: 0)
@@ -281,14 +285,15 @@ struct CompactActionButton: View {
 }
 
 struct SectionTitleView: View {
+    @EnvironmentObject private var languageService: AppLanguageService
     let title: String
     let subtitle: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
+            Text(languageService.phrase(title))
                 .font(.title3.weight(.bold))
-            Text(subtitle)
+            Text(languageService.phrase(subtitle))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

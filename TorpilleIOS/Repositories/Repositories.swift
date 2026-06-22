@@ -112,6 +112,39 @@ private func extractTotalXP(from data: [String: Any]) -> Int64 {
     return 0
 }
 
+private func extractCommunityXP(from data: [String: Any]) -> [String: Int64] {
+    guard let rawMap = data["communityXP"] as? [String: Any] else { return [:] }
+    var result: [String: Int64] = [:]
+    for (communityId, rawValue) in rawMap {
+        let cleanId = communityId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanId.isEmpty else { continue }
+        if let value = rawValue as? Int64 {
+            result[cleanId] = value
+        } else if let value = rawValue as? Int {
+            result[cleanId] = Int64(value)
+        } else if let value = rawValue as? Double {
+            result[cleanId] = Int64(value)
+        } else if let value = rawValue as? NSNumber {
+            result[cleanId] = value.int64Value
+        }
+    }
+    return result
+}
+
+private enum BasicContentFilter {
+    private static let blockedTerms = [
+        "porn", "porno", "xxx", "nude", "nudes", "sexe", "suicide",
+        "kill yourself", "va te tuer", "pute", "connard", "salope"
+    ]
+
+    static func validate(_ text: String) throws {
+        let normalized = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if blockedTerms.contains(where: { normalized.contains($0) }) {
+            throw TorpilleError.missingData("Ce contenu ne respecte pas les règles de la communauté.")
+        }
+    }
+}
+
 final class AuthRepository {
     private let auth = Auth.auth()
 
@@ -218,8 +251,15 @@ final class UserRepository {
             profileIcon: data["profileIcon"] as? String,
             communityIds: CommunityMembershipStore.normalizedIDs(from: data["communityIds"]),
             pinnedCommunityIds: CommunityMembershipStore.normalizedIDs(from: data["pinnedCommunityIds"], limit: 3),
+            communityXP: extractCommunityXP(from: data),
             xpTotal: extractTotalXP(from: data),
             fcmToken: (data["fcmTokens"] as? [String])?.first ?? (data["fcmToken"] as? String),
+            languageCode: data["languageCode"] as? String,
+            isLanguagePublic: (data["isLanguagePublic"] as? Bool) ?? true,
+            isLeaderboardPublic: (data["isLeaderboardPublic"] as? Bool) ?? true,
+            friendsCount: (data["friendsCount"] as? Int) ?? (data["friendsCount"] as? NSNumber)?.intValue ?? 0,
+            termsAcceptedAt: data["termsAcceptedAt"] as? Timestamp,
+            moderationRulesAcceptedAt: data["moderationRulesAcceptedAt"] as? Timestamp,
             updatedAt: data["updatedAt"] as? Timestamp
         )
     }
@@ -333,8 +373,8 @@ final class UserRepository {
                 self.decodeUserProfile(from: document, fallbackUID: document.documentID)
             } ?? [])
             .sorted { lhs, rhs in
-                if lhs.xpTotal != rhs.xpTotal {
-                    return lhs.xpTotal > rhs.xpTotal
+                if lhs.effectiveTotalXP != rhs.effectiveTotalXP {
+                    return lhs.effectiveTotalXP > rhs.effectiveTotalXP
                 }
 
                 let leftName = lhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -366,6 +406,7 @@ final class UserRepository {
         print("👤 profileIcon =", profileIcon ?? "nil")
 
         let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+        try BasicContentFilter.validate(clean)
         guard clean.count >= 3,
               clean.count <= 20,
               clean.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }) else {
@@ -393,14 +434,28 @@ final class UserRepository {
         }
 
         let existingXPTotal = extractTotalXP(from: existingData)
+        let existingCommunityXP = extractCommunityXP(from: existingData)
+        let alreadyAcceptedTerms = existingData["termsAcceptedAt"] as? Timestamp
+        let alreadyAcceptedRules = existingData["moderationRulesAcceptedAt"] as? Timestamp
+        let hasAvatar = resolvedPhotoURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || resolvedProfileIcon?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+
+        guard hasAvatar else {
+            throw TorpilleError.missingData("Ajoute une photo ou une icône de profil pour éviter les profils anonymes.")
+        }
 
         var payload: [String: Any] = [
             "uid": uid,
             "pseudo": clean,
             "pseudoKey": pseudoKey,
             "communityIds": CommunityMembershipStore.normalizedIDs(from: existingData["communityIds"]),
+            "communityXP": existingCommunityXP,
             "xptotal": existingXPTotal,
             "xpTotal": existingXPTotal,
+            "termsAcceptedAt": alreadyAcceptedTerms ?? now,
+            "moderationRulesAcceptedAt": alreadyAcceptedRules ?? now,
+            "isLanguagePublic": existingData["isLanguagePublic"] as? Bool ?? true,
+            "isLeaderboardPublic": existingData["isLeaderboardPublic"] as? Bool ?? true,
             "updatedAt": now
         ]
 
@@ -577,6 +632,128 @@ final class UserRepository {
         try await userRef.setData(payload, merge: true)
     }
 
+    func updatePublicProfileSettings(languageCode: String?, isLanguagePublic: Bool, isLeaderboardPublic: Bool) async throws {
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        var payload: [String: Any] = [
+            "isLanguagePublic": isLanguagePublic,
+            "isLeaderboardPublic": isLeaderboardPublic,
+            "updatedAt": Timestamp(date: Date())
+        ]
+        if let languageCode, !languageCode.isEmpty {
+            payload["languageCode"] = languageCode
+        }
+        try await users.document(uid).setData(payload, merge: true)
+    }
+
+    func searchUsersByPseudo(_ query: String, limit: Int = 20) async throws -> [UserProfile] {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines).normalizedPseudoKey
+        guard clean.count >= 2 else { return [] }
+        let snapshot = try await users
+            .whereField("pseudoKey", isGreaterThanOrEqualTo: clean)
+            .whereField("pseudoKey", isLessThanOrEqualTo: clean + "\u{f8ff}")
+            .limit(to: limit)
+            .getDocuments()
+
+        let myUID = auth.currentUser?.uid ?? ""
+        let profiles = snapshot.documents
+            .map { decodeUserProfile(from: $0, fallbackUID: $0.documentID) }
+            .filter { $0.uid != myUID }
+        return await enrichProfilesWithFriendCounts(profiles)
+    }
+
+    private func enrichProfilesWithFriendCounts(_ profiles: [UserProfile]) async -> [UserProfile] {
+        await withTaskGroup(of: (String, Int).self) { group in
+            for profile in profiles where !profile.uid.isEmpty {
+                group.addTask {
+                    let snapshot = try? await self.users.document(profile.uid).collection("friends").getDocuments()
+                    return (profile.uid, snapshot?.documents.count ?? 0)
+                }
+            }
+
+            var counts: [String: Int] = [:]
+            for await pair in group {
+                counts[pair.0] = pair.1
+            }
+
+            return profiles.map { profile in
+                var enriched = profile
+                enriched.friendsCount = counts[profile.uid] ?? profile.friendsCount
+                return enriched
+            }
+        }
+    }
+
+    func observeFriends(handler: @escaping ([PublicFriend]) -> Void) -> ListenerRegistration? {
+        guard let uid = auth.currentUser?.uid else { return nil }
+        return users.document(uid).collection("friends")
+            .order(by: "pseudo")
+            .addSnapshotListener { snapshot, _ in
+                let values = snapshot?.documents.compactMap { try? $0.data(as: PublicFriend.self) } ?? []
+                handler(values)
+            }
+    }
+
+    func sendFriendRequest(to profile: UserProfile) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard profile.uid != uid else { throw TorpilleError.missingData("Tu ne peux pas t'ajouter toi-même.") }
+
+        let me = try await getMeOrThrow()
+        let requestId = [uid, profile.uid].sorted().joined(separator: "_")
+        try await db.collection("friendRequests").document(requestId).setData([
+            "fromUid": uid,
+            "fromPseudo": me.pseudo,
+            "fromPhotoUrl": me.photoUrl ?? "",
+            "fromProfileIcon": me.profileIcon ?? "",
+            "toUid": profile.uid,
+            "toPseudo": profile.pseudo,
+            "status": FriendRequestStatus.pending.rawValue,
+            "createdAt": Timestamp(date: Date()),
+            "updatedAt": Timestamp(date: Date())
+        ], merge: false)
+    }
+
+    func acceptFriendRequest(_ request: FriendRequest) async throws {
+        guard let uid = auth.currentUser?.uid, request.toUid == uid else {
+            throw TorpilleError.notAuthenticated
+        }
+        let me = try await getMeOrThrow()
+        let now = Timestamp(date: Date())
+        let batch = db.batch()
+        let requestRef = db.collection("friendRequests").document(request.id)
+        batch.setData([
+            "status": FriendRequestStatus.accepted.rawValue,
+            "updatedAt": now
+        ], forDocument: requestRef, merge: true)
+        batch.setData([
+            "uid": request.fromUid,
+            "pseudo": request.fromPseudo,
+            "photoUrl": request.fromPhotoUrl ?? "",
+            "profileIcon": request.fromProfileIcon ?? "",
+            "createdAt": now
+        ], forDocument: users.document(uid).collection("friends").document(request.fromUid), merge: true)
+        batch.setData([
+            "uid": uid,
+            "pseudo": me.pseudo,
+            "photoUrl": me.photoUrl ?? "",
+            "profileIcon": me.profileIcon ?? "",
+            "createdAt": now
+        ], forDocument: users.document(request.fromUid).collection("friends").document(uid), merge: true)
+        try await batch.commit()
+    }
+
+    func rejectFriendRequest(_ request: FriendRequest) async throws {
+        guard let uid = auth.currentUser?.uid, request.toUid == uid else {
+            throw TorpilleError.notAuthenticated
+        }
+        try await db.collection("friendRequests").document(request.id).setData([
+            "status": FriendRequestStatus.rejected.rawValue,
+            "updatedAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
     private func propagateProfileToCommunityMemberships(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
         guard let uid = auth.currentUser?.uid else {
             throw TorpilleError.notAuthenticated
@@ -673,6 +850,7 @@ final class CommunityRepository {
     private var communities: CollectionReference { db.collection("communities") }
     private var users: CollectionReference { db.collection("users") }
     private var reels: CollectionReference { db.collection("reels") }
+    private var reports: CollectionReference { db.collection("reports") }
 
     private func normalizedCommunityIds(_ communityIds: [String]) -> [String] {
         CommunityMembershipStore.normalizedIDs(from: communityIds)
@@ -681,6 +859,102 @@ final class CommunityRepository {
     private func loadProfileCommunityIds(for uid: String) async throws -> [String] {
         let snapshot = try await users.document(uid).getDocument()
         return CommunityMembershipStore.normalizedIDs(from: snapshot.data()?["communityIds"])
+    }
+
+    private func loadBlockedUserIds() async -> Set<String> {
+        guard let uid = auth.currentUser?.uid else { return [] }
+        let snapshot = try? await users.document(uid).collection("blockedUsers").getDocuments()
+        return Set(snapshot?.documents.map(\.documentID) ?? [])
+    }
+
+    private func loadHiddenMemberIds(communityId: String) async -> Set<String> {
+        guard let uid = auth.currentUser?.uid else { return [] }
+        let snapshot = try? await users.document(uid)
+            .collection("contentFilters")
+            .document(communityId)
+            .collection("hiddenMembers")
+            .getDocuments()
+        return Set(snapshot?.documents.map(\.documentID) ?? [])
+    }
+
+    private func loadExcludedUserIds(communityId: String?) async -> Set<String> {
+        var excluded = await loadBlockedUserIds()
+        if let communityId, !communityId.isEmpty {
+            excluded.formUnion(await loadHiddenMemberIds(communityId: communityId))
+        }
+        return excluded
+    }
+
+    private func filterMembers(_ members: [Member], communityId: String) async -> [Member] {
+        let excluded = await loadExcludedUserIds(communityId: communityId)
+        return members.filter { member in
+            member.uid == auth.currentUser?.uid || excluded.contains(member.uid) == false
+        }
+    }
+
+    private func filterMessages(_ messages: [Message], communityId: String) async -> [Message] {
+        let excluded = await loadExcludedUserIds(communityId: communityId)
+        return messages.filter { message in
+            !message.isQuarantined && excluded.contains(message.senderUid) == false
+        }
+    }
+
+    private func filterTorpilles(_ torpilles: [Torpille], communityId: String) async -> [Torpille] {
+        let excluded = await loadExcludedUserIds(communityId: communityId)
+        return torpilles.filter { torpille in
+            !torpille.isQuarantined && excluded.contains(torpille.fromUid) == false
+        }
+    }
+
+    private func filterReels(_ reels: [PublishedReel]) async -> [PublishedReel] {
+        let excluded = await loadBlockedUserIds()
+        return reels.filter { reel in
+            !reel.isQuarantined && excluded.contains(reel.authorUid) == false
+        }
+    }
+
+    private func enrichReelsWithAuthorProfiles(_ reels: [PublishedReel]) async -> [PublishedReel] {
+        let authorIds = Array(Set(reels.map(\.authorUid).filter { !$0.isEmpty }))
+        guard !authorIds.isEmpty else { return reels }
+
+        let profilesByUID = await withTaskGroup(of: (String, UserProfile?).self) { group in
+            for uid in authorIds {
+                group.addTask {
+                    let snapshot = try? await self.users.document(uid).getDocument()
+                    let profile = snapshot.flatMap { document -> UserProfile? in
+                        guard document.exists else { return nil }
+                        var profile = try? document.data(as: UserProfile.self)
+                        if profile?.uid.isEmpty == true {
+                            profile?.uid = uid
+                        }
+                        return profile
+                    }
+                    return (uid, profile)
+                }
+            }
+
+            var collected: [(String, UserProfile?)] = []
+            for await pair in group {
+                collected.append(pair)
+            }
+            return Dictionary(uniqueKeysWithValues: collected.compactMap { uid, profile in
+                profile.map { (uid, $0) }
+            })
+        }
+
+        return reels.map { reel in
+            guard let profile = profilesByUID[reel.authorUid] else {
+                return reel
+            }
+
+            var enriched = reel
+            if !profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                enriched.authorPseudo = profile.pseudo
+            }
+            enriched.authorPhotoUrl = profile.photoUrl
+            enriched.authorProfileIcon = profile.profileIcon
+            return enriched
+        }
     }
 
     private func setProfileCommunityIds(_ communityIds: [String], for uid: String) async throws {
@@ -937,7 +1211,9 @@ final class CommunityRepository {
             createdAt: timestampValue(from: data["createdAt"]),
             savedAt: timestampValue(from: data["savedAt"]),
             savedByUid: stringValue(from: data["savedByUid"]),
-            savedByPseudo: stringValue(from: data["savedByPseudo"])
+            savedByPseudo: stringValue(from: data["savedByPseudo"]),
+            moderationStatus: stringValue(from: data["moderationStatus"]),
+            reportCount: int64Value(from: data["reportCount"])
         )
     }
 
@@ -973,7 +1249,9 @@ final class CommunityRepository {
             publishedAt: timestampValue(from: data["publishedAt"]),
             publishedByUid: stringValue(from: data["publishedByUid"]),
             publishedByPseudo: stringValue(from: data["publishedByPseudo"]),
-            communityName: stringValue(from: data["communityName"])
+            communityName: stringValue(from: data["communityName"]),
+            moderationStatus: stringValue(from: data["moderationStatus"]),
+            reportCount: int64Value(from: data["reportCount"])
         )
     }
 
@@ -1004,16 +1282,27 @@ final class CommunityRepository {
     }
 
     private func recalculateXP(for uid: String) async throws {
-        let memberships = try await db.collectionGroup("members")
-            .whereField("uid", isEqualTo: uid)
-            .getDocuments()
+        let communityIds = try await loadCanonicalCommunityIds(for: uid)
+        var communityXP: [String: Int64] = [:]
+        var validCommunityIds: [String] = []
 
-        let totalXP = memberships.documents.reduce(Int64(0)) { partial, document in
-            partial + asInt64(document.data()["xpInCommunity"])
+        for communityId in communityIds {
+            let memberSnapshot = try await communities
+                .document(communityId)
+                .collection("members")
+                .document(uid)
+                .getDocument()
+
+            guard memberSnapshot.exists else { continue }
+            validCommunityIds.append(communityId)
+            communityXP[communityId] = asInt64(memberSnapshot.data()?["xpInCommunity"])
         }
 
+        let totalXP = communityXP.values.reduce(Int64(0), +)
         try await users.document(uid).setData([
             "uid": uid,
+            "communityIds": validCommunityIds,
+            "communityXP": communityXP,
             "xptotal": totalXP,
             "xpTotal": totalXP,
             "updatedAt": Timestamp(date: Date())
@@ -1112,7 +1401,7 @@ final class CommunityRepository {
     }
 
     func inviteLink(for communityId: String) -> String {
-        "https://torpille-38783.web.app/join?cid=\(communityId)"
+        "https://torpille-38783.web.app/join.html?cid=\(communityId)"
     }
 
     func getCommunityOrThrow(_ communityId: String) async throws -> Community {
@@ -1126,6 +1415,10 @@ final class CommunityRepository {
 
     func createCommunity(name: String, isPublic: Bool, responseTimeSeconds: Int64, me: UserProfile) async throws -> String {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        try BasicContentFilter.validate(name)
+        guard me.hasRequiredIdentity else {
+            throw TorpilleError.missingData("Complète ton profil avant de créer une communauté.")
+        }
         do {
             try await refreshCurrentAuthToken()
         } catch {
@@ -1181,6 +1474,9 @@ final class CommunityRepository {
 
     func joinCommunity(communityId: String, me: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard me.hasRequiredIdentity else {
+            throw TorpilleError.missingData("Complète ton profil avant de rejoindre une communauté.")
+        }
         try await refreshCurrentAuthToken()
         let communityRef = communities.document(communityId)
         let communitySnapshot = try await communityRef.getDocument()
@@ -1391,7 +1687,8 @@ final class CommunityRepository {
 
                 Task {
                     let enriched = await self.enrichMembersWithUserProfiles(values)
-                    handler(enriched)
+                    let filtered = await self.filterMembers(enriched, communityId: communityId)
+                    handler(filtered)
                 }
             }
     }
@@ -1420,9 +1717,9 @@ final class CommunityRepository {
 
         let profilesByUID = Dictionary(uniqueKeysWithValues: profilePairs)
 
-        return members.map { member in
+        return members.compactMap { member in
             guard let profile = profilesByUID[member.uid] ?? nil else {
-                return member
+                return nil
             }
 
             var updatedMember = member
@@ -1481,7 +1778,11 @@ final class CommunityRepository {
                 if !expired.isEmpty {
                     Task { try? await self.deleteExpiredMessages(communityId: communityId, messages: expired) }
                 }
-                handler(values.filter { self.isMessageVisibleInDiscussion($0) })
+                Task {
+                    let visible = values.filter { self.isMessageVisibleInDiscussion($0) }
+                    let filtered = await self.filterMessages(visible, communityId: communityId)
+                    handler(filtered)
+                }
             }
     }
 
@@ -1491,7 +1792,10 @@ final class CommunityRepository {
             .order(by: "savedAt", descending: true)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { self.decodeMessage(from: $0) } ?? []
-                handler(values)
+                Task {
+                    let filtered = await self.filterMessages(values, communityId: communityId)
+                    handler(filtered)
+                }
             }
     }
 
@@ -1542,6 +1846,7 @@ final class CommunityRepository {
 
     func sendText(communityId: String, senderPseudo: String, text: String) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        try BasicContentFilter.validate(text)
         print("📍 CommunityRepository.sendText")
         print("💬 communityId =", communityId)
         print("💬 uid =", uid)
@@ -1552,6 +1857,8 @@ final class CommunityRepository {
             "senderUid": uid,
             "senderPseudo": senderPseudo,
             "text": text,
+            "moderationStatus": "visible",
+            "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
         do {
@@ -1576,6 +1883,8 @@ final class CommunityRepository {
             "imageUrl": uploaded.downloadURL,
             "imageBucket": uploaded.bucket,
             "imagePath": uploaded.storagePath,
+            "moderationStatus": "visible",
+            "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
 
@@ -1595,6 +1904,8 @@ final class CommunityRepository {
             "videoBucket": uploaded.bucket,
             "videoPath": uploaded.storagePath,
             "videoUrl": uploaded.downloadURL,
+            "moderationStatus": "visible",
+            "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
 
@@ -1608,7 +1919,10 @@ final class CommunityRepository {
             .limit(to: 40)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { self.decodeTorpille(from: $0) } ?? []
-                handler(values)
+                Task {
+                    let filtered = await self.filterTorpilles(values, communityId: communityId)
+                    handler(filtered)
+                }
             }
     }
 
@@ -1678,6 +1992,8 @@ final class CommunityRepository {
             "audioBucket": uploaded.bucket,
             "audioPath": uploaded.storagePath,
             "audioDurationSeconds": uploaded.durationSeconds,
+            "moderationStatus": "visible",
+            "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
         do {
@@ -1707,7 +2023,10 @@ final class CommunityRepository {
                     value?.id = doc.documentID
                     return value
                 } ?? []
-                handler(values)
+                Task {
+                    let filtered = await self.filterReels(values)
+                    handler(await self.enrichReelsWithAuthorProfiles(filtered))
+                }
             }
     }
 
@@ -1720,8 +2039,30 @@ final class CommunityRepository {
                     value?.id = doc.documentID
                     return value
                 } ?? []
-                handler(values.sorted { ($0.publishedAt?.dateValue() ?? .distantPast) > ($1.publishedAt?.dateValue() ?? .distantPast) })
+                Task {
+                    let filtered = await self.filterReels(values)
+                    let enriched = await self.enrichReelsWithAuthorProfiles(filtered)
+                    handler(enriched.sorted { ($0.publishedAt?.dateValue() ?? .distantPast) > ($1.publishedAt?.dateValue() ?? .distantPast) })
+                }
             }
+    }
+
+    func publicUserProfile(uid: String) async throws -> UserProfile {
+        let cleanUID = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUID.isEmpty else {
+            throw TorpilleError.missingData("Profil introuvable.")
+        }
+
+        let snapshot = try await users.document(cleanUID).getDocument()
+        guard snapshot.exists else {
+            throw TorpilleError.missingData("Profil introuvable.")
+        }
+
+        var profile = try snapshot.data(as: UserProfile.self)
+        if profile.uid.isEmpty {
+            profile.uid = cleanUID
+        }
+        return profile
     }
 
     func publishSavedTorpilleToReels(communityId: String, message: Message) async throws {
@@ -1779,7 +2120,9 @@ final class CommunityRepository {
             videoPath: message.videoPath,
             taggedPseudo: message.taggedPseudo,
             createdAt: message.createdAt,
-            publishedAt: publishedAt
+            publishedAt: publishedAt,
+            moderationStatus: "visible",
+            reportCount: 0
         ), forDocument: reelRef)
         try await batch.commit()
     }
@@ -1940,7 +2283,7 @@ final class CommunityRepository {
             )
         }
 
-        var torpillePayload: [String: Any] = [
+        let torpillePayload: [String: Any] = [
             "id": torpDoc.documentID,
             "fromUid": uid,
             "fromPseudo": senderPseudo,
@@ -1954,7 +2297,9 @@ final class CommunityRepository {
             "createdAt": createdAt,
             "deadlineAt": deadlineAt,
             "responded": false,
-            "isPublished": false
+            "isPublished": false,
+            "moderationStatus": "visible",
+            "reportCount": 0
         ]
         batch.setData(torpillePayload, forDocument: torpDoc)
 
@@ -1979,7 +2324,12 @@ final class CommunityRepository {
             tagX: tagX,
             tagY: tagY,
             torpilleId: torpDoc.documentID,
-            createdAt: createdAt
+            createdAt: createdAt,
+            savedAt: nil,
+            savedByUid: nil,
+            savedByPseudo: nil,
+            moderationStatus: "visible",
+            reportCount: 0
         ), forDocument: msgDoc)
 
         if hasIdentifiedTarget, let resolvedTaggedUid {
@@ -2107,6 +2457,135 @@ final class CommunityRepository {
 
     func observeMembersForMap(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
         observeMembers(communityId, handler: handler)
+    }
+
+    func hideMemberContent(communityId: String, member: Member) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard member.uid != uid else {
+            throw TorpilleError.missingData("Tu ne peux pas masquer ton propre contenu.")
+        }
+
+        var payload: [String: Any] = [
+            "uid": member.uid,
+            "pseudo": member.displayName,
+            "createdAt": Timestamp(date: Date())
+        ]
+        if let photoUrl = member.photoUrl, !photoUrl.isEmpty {
+            payload["photoUrl"] = photoUrl
+        }
+        if let profileIcon = member.profileIcon, !profileIcon.isEmpty {
+            payload["profileIcon"] = profileIcon
+        }
+
+        try await users.document(uid)
+            .collection("contentFilters")
+            .document(communityId)
+            .collection("hiddenMembers")
+            .document(member.uid)
+            .setData(payload, merge: true)
+    }
+
+    func showMemberContent(communityId: String, memberUid: String) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        try await users.document(uid)
+            .collection("contentFilters")
+            .document(communityId)
+            .collection("hiddenMembers")
+            .document(memberUid)
+            .delete()
+    }
+
+    func blockUser(_ member: Member) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard member.uid != uid else {
+            throw TorpilleError.missingData("Tu ne peux pas te bloquer toi-même.")
+        }
+
+        var payload: [String: Any] = [
+            "blockedUid": member.uid,
+            "pseudo": member.displayName,
+            "createdAt": Timestamp(date: Date())
+        ]
+        if let photoUrl = member.photoUrl, !photoUrl.isEmpty {
+            payload["photoUrl"] = photoUrl
+        }
+        if let profileIcon = member.profileIcon, !profileIcon.isEmpty {
+            payload["profileIcon"] = profileIcon
+        }
+
+        try await users.document(uid)
+            .collection("blockedUsers")
+            .document(member.uid)
+            .setData(payload, merge: true)
+    }
+
+    func unblockUser(_ blockedUid: String) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        try await users.document(uid)
+            .collection("blockedUsers")
+            .document(blockedUid)
+            .delete()
+    }
+
+    func observeBlockedUsers(handler: @escaping ([BlockedUser]) -> Void) -> ListenerRegistration? {
+        guard let uid = auth.currentUser?.uid else {
+            handler([])
+            return nil
+        }
+
+        return users.document(uid)
+            .collection("blockedUsers")
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { snapshot, _ in
+                let values = snapshot?.documents.compactMap { document -> BlockedUser? in
+                    guard var blocked = try? document.data(as: BlockedUser.self) else {
+                        return nil
+                    }
+                    if blocked.blockedUid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        blocked.blockedUid = document.documentID
+                    }
+                    return blocked
+                } ?? []
+                handler(values)
+            }
+    }
+
+    func reportContent(
+        communityId: String?,
+        contentId: String,
+        contentType: ReportedContentType,
+        authorUid: String?,
+        authorPseudo: String?,
+        reason: ReportReason,
+        details: String
+    ) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let cleanContentId = contentId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanContentId.isEmpty else {
+            throw TorpilleError.missingData("Contenu introuvable.")
+        }
+
+        try BasicContentFilter.validate(details)
+        var payload: [String: Any] = [
+            "reporterUid": uid,
+            "contentId": cleanContentId,
+            "contentType": contentType.rawValue,
+            "reason": reason.rawValue,
+            "details": details.trimmingCharacters(in: .whitespacesAndNewlines),
+            "status": "open",
+            "createdAt": Timestamp(date: Date()),
+            "updatedAt": Timestamp(date: Date())
+        ]
+        if let communityId, !communityId.isEmpty {
+            payload["communityId"] = communityId
+        }
+        if let authorUid, !authorUid.isEmpty {
+            payload["authorUid"] = authorUid
+        }
+        if let authorPseudo, !authorPseudo.isEmpty {
+            payload["authorPseudo"] = authorPseudo
+        }
+        try await reports.addDocument(data: payload)
     }
 }
     

@@ -197,7 +197,7 @@ struct CommunityInfoScreen: View {
                     .font(.title2.weight(.bold))
 
                 if let community = vm.community {
-                    Text("Invitation : https://torpille-38783.web.app/join?cid=\(community.stableId)")
+                    Text("Invitation : https://torpille-38783.web.app/join.html?cid=\(community.stableId)")
                         .font(.footnote)
                         .textSelection(.enabled)
                     Text("La page d’invitation permet de rejoindre cette communauté.")
@@ -272,7 +272,22 @@ struct CommunityInfoScreen: View {
                     }
                     .padding(.vertical, 4)
                     .contextMenu {
+                        if member.uid != env.communityRepository.currentUID {
+                            Button {
+                                vm.hideContentFromMember(communityId: communityId, member: member)
+                            } label: {
+                                Label("Masquer ses contenus ici", systemImage: "eye.slash.fill")
+                            }
+
+                            Button(role: .destructive) {
+                                vm.blockMember(member)
+                            } label: {
+                                Label("Bloquer cet utilisateur", systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        }
+
                         if vm.canModerateMembers, member.uid != vm.community?.adminUid {
+                            Divider()
                             Button(role: .destructive) {
                                 vm.removeMember(communityId: communityId, member: member)
                             } label: {

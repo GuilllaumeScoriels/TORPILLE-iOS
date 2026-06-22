@@ -11,11 +11,27 @@ struct UserProfile: Codable, Identifiable {
     var profileIcon: String?
     var communityIds: [String] = []
     var pinnedCommunityIds: [String] = []
+    var communityXP: [String: Int64] = [:]
     var xpTotal: Int64 = 0
     var fcmToken: String?
+    var languageCode: String?
+    var isLanguagePublic: Bool = true
+    var isLeaderboardPublic: Bool = true
+    var friendsCount: Int = 0
+    var termsAcceptedAt: Timestamp?
+    var moderationRulesAcceptedAt: Timestamp?
     var updatedAt: Timestamp?
 
     var id: String { uid.isEmpty ? (documentId ?? UUID().uuidString) : uid }
+    var communityXPTotal: Int64 { communityXP.values.reduce(0, +) }
+    var effectiveTotalXP: Int64 { communityXP.isEmpty ? xpTotal : communityXPTotal }
+
+    var hasRequiredIdentity: Bool {
+        let hasPseudo = !pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAvatar = photoUrl?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || profileIcon?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return hasPseudo && hasAvatar && termsAcceptedAt != nil && moderationRulesAcceptedAt != nil
+    }
 }
 
 struct Community: Codable, Identifiable {
@@ -84,6 +100,8 @@ struct Message: Codable, Identifiable {
     var savedAt: Timestamp?
     var savedByUid: String?
     var savedByPseudo: String?
+    var moderationStatus: String?
+    var reportCount: Int64?
 
     var stableId: String {
         if let id, !id.isEmpty {
@@ -94,6 +112,10 @@ struct Message: Codable, Identifiable {
 
     var isSaved: Bool {
         savedAt != nil
+    }
+
+    var isQuarantined: Bool {
+        moderationStatus == "quarantined" || moderationStatus == "removed"
     }
 }
 
@@ -121,12 +143,18 @@ struct Torpille: Codable, Identifiable {
     var publishedByUid: String?
     var publishedByPseudo: String?
     var communityName: String?
+    var moderationStatus: String?
+    var reportCount: Int64?
 
     var stableId: String {
         if let id, !id.isEmpty {
             return id
         }
         return documentId ?? UUID().uuidString
+    }
+
+    var isQuarantined: Bool {
+        moderationStatus == "quarantined" || moderationStatus == "removed"
     }
 }
 
@@ -139,12 +167,16 @@ struct PublishedReel: Codable, Identifiable {
     var communityName: String = ""
     var authorUid: String = ""
     var authorPseudo: String = ""
+    var authorPhotoUrl: String?
+    var authorProfileIcon: String?
     var videoUrl: String?
     var videoBucket: String?
     var videoPath: String?
     var taggedPseudo: String?
     var createdAt: Timestamp?
     var publishedAt: Timestamp?
+    var moderationStatus: String?
+    var reportCount: Int64?
 
     var stableId: String {
         if let id, !id.isEmpty {
@@ -152,6 +184,71 @@ struct PublishedReel: Codable, Identifiable {
         }
         return documentId ?? UUID().uuidString
     }
+
+    var isQuarantined: Bool {
+        moderationStatus == "quarantined" || moderationStatus == "removed"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case documentId
+        case id
+        case torpilleId
+        case sourceMessageId
+        case communityId
+        case communityName
+        case authorUid
+        case authorPseudo
+        case videoUrl
+        case videoBucket
+        case videoPath
+        case taggedPseudo
+        case createdAt
+        case publishedAt
+        case moderationStatus
+        case reportCount
+    }
+}
+
+enum ReportReason: String, Codable, CaseIterable, Identifiable {
+    case harassment
+    case sexualContent
+    case violenceThreat
+    case hateSpeech
+    case spam
+    case unwantedContent
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .harassment: return "Harcèlement"
+        case .sexualContent: return "Contenu sexuel"
+        case .violenceThreat: return "Violence ou menace"
+        case .hateSpeech: return "Discours haineux"
+        case .spam: return "Spam"
+        case .unwantedContent: return "Contenu non désiré"
+        case .other: return "Autre"
+        }
+    }
+}
+
+enum ReportedContentType: String, Codable {
+    case message
+    case torpille
+    case reel
+    case profile
+}
+
+struct BlockedUser: Codable, Identifiable {
+    @DocumentID var documentId: String?
+    var blockedUid: String = ""
+    var pseudo: String = ""
+    var photoUrl: String?
+    var profileIcon: String?
+    var createdAt: Timestamp?
+
+    var id: String { blockedUid.isEmpty ? (documentId ?? UUID().uuidString) : blockedUid }
 }
 
 struct UploadedVideo {
@@ -222,4 +319,36 @@ struct AppNotificationItem: Codable, Identifiable, Equatable {
     var createdAt: Date = Date()
     var isRead: Bool = false
     var deepLink: String = "notificationCenter"
+}
+
+struct PublicFriend: Codable, Identifiable {
+    @DocumentID var documentId: String?
+    var uid: String = ""
+    var pseudo: String = ""
+    var photoUrl: String?
+    var profileIcon: String?
+    var createdAt: Timestamp?
+
+    var id: String { uid.isEmpty ? (documentId ?? UUID().uuidString) : uid }
+}
+
+enum FriendRequestStatus: String, Codable {
+    case pending
+    case accepted
+    case rejected
+}
+
+struct FriendRequest: Codable, Identifiable {
+    @DocumentID var documentId: String?
+    var fromUid: String = ""
+    var fromPseudo: String = ""
+    var fromPhotoUrl: String?
+    var fromProfileIcon: String?
+    var toUid: String = ""
+    var toPseudo: String = ""
+    var status: String = FriendRequestStatus.pending.rawValue
+    var createdAt: Timestamp?
+    var updatedAt: Timestamp?
+
+    var id: String { documentId ?? "\(fromUid)_\(toUid)" }
 }

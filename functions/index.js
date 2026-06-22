@@ -7,6 +7,7 @@ admin.initializeApp();
 const db = admin.firestore();
 const storage = admin.storage();
 const IOS_BUNDLE_ID = process.env.IOS_BUNDLE_ID || "com.torpille.ios";
+const REPORT_QUARANTINE_THRESHOLD = Number.parseInt(process.env.REPORT_QUARANTINE_THRESHOLD || "3", 10);
 
 function asInt64(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -162,6 +163,19 @@ async function getNotificationPreferenceMode(uid, communityId) {
   return typeof mode === "string" ? mode : "mentionsOnly";
 }
 
+function shouldNotifyForPreference(mode, isExplicitlyIdentified) {
+  if (mode === "all") {
+    return true;
+  }
+  return mode === "mentionsOnly" && isExplicitlyIdentified;
+}
+
+function torpilleActionBody(fromPseudo, toPseudo) {
+  const sender = typeof fromPseudo === "string" && fromPseudo.trim() ? fromPseudo.trim() : "Un utilisateur";
+  const target = typeof toPseudo === "string" && toPseudo.trim() ? toPseudo.trim() : "un utilisateur";
+  return `${sender} a torpillé ${target}`;
+}
+
 async function cleanupInvalidTokens(uid, invalidTokens) {
   const cleaned = normalizeStringArray(invalidTokens);
   if (!cleaned.length) {
@@ -257,6 +271,98 @@ function buildMessageBody(message) {
     default:
       return `${senderPrefix}a envoye un message.`;
   }
+}
+
+function moderatorUidsFromEnv() {
+  return normalizeStringArray((process.env.MODERATOR_UIDS || "").split(","));
+}
+
+async function moderatorUidsForReport(report) {
+  const configured = moderatorUidsFromEnv();
+  if (configured.length) {
+    return configured;
+  }
+
+  const communityId = typeof report.communityId === "string" ? report.communityId.trim() : "";
+  if (!communityId) {
+    return [];
+  }
+
+  const communitySnapshot = await db.collection("communities").doc(communityId).get();
+  const adminUid = communitySnapshot.data() && communitySnapshot.data().adminUid;
+  return typeof adminUid === "string" && adminUid.trim() ? [adminUid.trim()] : [];
+}
+
+function targetRefForReport(report) {
+  const contentId = typeof report.contentId === "string" ? report.contentId.trim() : "";
+  const communityId = typeof report.communityId === "string" ? report.communityId.trim() : "";
+  const contentType = typeof report.contentType === "string" ? report.contentType.trim() : "";
+  if (!contentId) {
+    return null;
+  }
+
+  if (contentType === "reel") {
+    return db.collection("reels").doc(contentId);
+  }
+
+  if (!communityId) {
+    return null;
+  }
+
+  if (contentType === "message") {
+    return db.collection("communities").doc(communityId).collection("messages").doc(contentId);
+  }
+  if (contentType === "torpille") {
+    return db.collection("communities").doc(communityId).collection("torpilles").doc(contentId);
+  }
+  return null;
+}
+
+async function quarantineIfNeeded(report) {
+  const targetRef = targetRefForReport(report);
+  if (!targetRef) {
+    return {quarantined: false, reportCount: 0};
+  }
+
+  const contentId = typeof report.contentId === "string" ? report.contentId.trim() : "";
+  const contentType = typeof report.contentType === "string" ? report.contentType.trim() : "";
+  const reportsSnapshot = await db.collection("reports")
+    .where("contentId", "==", contentId)
+    .where("contentType", "==", contentType)
+    .get();
+  const reportCount = reportsSnapshot.size;
+
+  const payload = {
+    reportCount,
+    moderationUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (reportCount >= REPORT_QUARANTINE_THRESHOLD) {
+    payload.moderationStatus = "quarantined";
+    payload.quarantinedAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  await targetRef.set(payload, {merge: true});
+
+  if (contentType === "message") {
+    const targetSnapshot = await targetRef.get();
+    const torpilleId = targetSnapshot.data() && targetSnapshot.data().torpilleId;
+    const communityId = typeof report.communityId === "string" ? report.communityId.trim() : "";
+    if (typeof torpilleId === "string" && torpilleId.trim() && communityId) {
+      await db.collection("communities")
+        .doc(communityId)
+        .collection("torpilles")
+        .doc(torpilleId.trim())
+        .set(payload, {merge: true});
+      const reelRef = db.collection("reels").doc(torpilleId.trim());
+      const reelSnapshot = await reelRef.get();
+      if (reelSnapshot.exists) {
+        await reelRef.set(payload, {merge: true});
+      }
+    }
+  }
+
+  return {quarantined: reportCount >= REPORT_QUARANTINE_THRESHOLD, reportCount};
 }
 
 async function getAuthUserIfExists(uid) {
@@ -446,12 +552,11 @@ exports.notifyOnTorpilleCreated = onDocumentCreated(
       const communitySnapshot = await db.collection("communities").doc(communityId).get();
       const communityName = (communitySnapshot.data() && communitySnapshot.data().name) || "Torpille";
       const senderPseudo = typeof torpille.fromPseudo === "string" ? torpille.fromPseudo.trim() : "";
-      const body = senderPseudo ?
-        `@${senderPseudo} t'a torpille dans ${communityName}.` :
-        `Tu as recu une torpille dans ${communityName}.`;
+      const targetPseudo = typeof torpille.taggedPseudo === "string" ? torpille.taggedPseudo.trim() : "";
+      const body = torpilleActionBody(senderPseudo, targetPseudo);
 
       const result = await sendPushToUser(toUid, {
-        title: communityName,
+        title: "",
         body,
         data: {
           destination: "notificationCenter",
@@ -497,7 +602,8 @@ exports.notifyOnMessageCreated = onDocumentCreated(
         }
 
         const mode = await getNotificationPreferenceMode(recipientUid, communityId);
-        if (mode !== "all") {
+        const isExplicitlyIdentified = targetUid && recipientUid === targetUid;
+        if (!shouldNotifyForPreference(mode, isExplicitlyIdentified)) {
           return;
         }
 
@@ -518,5 +624,75 @@ exports.notifyOnMessageCreated = onDocumentCreated(
           result,
         });
       }));
+    }
+);
+
+exports.onReportCreated = onDocumentCreated(
+    {
+      region: "europe-west1",
+      document: "reports/{reportId}",
+    },
+    async (event) => {
+      const report = event.data && event.data.data();
+      if (!report) {
+        return;
+      }
+
+      const reportId = event.params.reportId;
+      const reporterUid = typeof report.reporterUid === "string" ? report.reporterUid.trim() : "";
+      const reason = typeof report.reason === "string" ? report.reason : "other";
+      const authorPseudo = typeof report.authorPseudo === "string" && report.authorPseudo.trim() ?
+        `@${report.authorPseudo.trim()}` :
+        "un contenu";
+
+      let moderationResult = {quarantined: false, reportCount: 0};
+      try {
+        moderationResult = await quarantineIfNeeded(report);
+      } catch (error) {
+        console.error("onReportCreated quarantine failed", {
+          reportId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const moderatorUids = await moderatorUidsForReport(report);
+      await Promise.all(moderatorUids.map(async (moderatorUid) => {
+        if (!moderatorUid || moderatorUid === reporterUid) {
+          return;
+        }
+        await sendPushToUser(moderatorUid, {
+          title: "Nouveau signalement Torpille",
+          body: `${authorPseudo} a été signalé (${reason}).`,
+          data: {
+            destination: "notificationCenter",
+            type: "moderationReport",
+            reportId,
+            contentId: report.contentId || "",
+            contentType: report.contentType || "",
+          },
+        });
+      }));
+
+      if (reporterUid) {
+        await sendPushToUser(reporterUid, {
+          title: "Signalement reçu",
+          body: moderationResult.quarantined ?
+            "Merci. Ce contenu est automatiquement mis en quarantaine pendant l'analyse." :
+            "Merci. Nous vérifions ce contenu et agirons si nécessaire.",
+          data: {
+            destination: "notificationCenter",
+            type: "reportAcknowledgement",
+            reportId,
+          },
+        });
+      }
+
+      await event.data.ref.set({
+        status: "reviewing",
+        reportCountAtCreation: moderationResult.reportCount,
+        autoQuarantined: moderationResult.quarantined,
+        moderatorUids,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
     }
 );

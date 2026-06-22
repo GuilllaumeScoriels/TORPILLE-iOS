@@ -73,6 +73,33 @@ final class HomeCommunityPresentationTests: XCTestCase {
         XCTAssertEqual(result.map(\.stableId), ["oldest", "recent", "older"])
     }
 
+    func testLeaderboardXPUsesSelectedCommunityTotalsFromUserProfile() {
+        let player = UserProfile(
+            documentId: "u1",
+            uid: "u1",
+            email: nil,
+            pseudo: "Alice",
+            pseudoKey: "alice",
+            photoUrl: nil,
+            profileIcon: nil,
+            communityIds: ["c1", "c2", "c3"],
+            pinnedCommunityIds: [],
+            communityXP: ["c1": 15, "c2": 40, "c3": 7],
+            xpTotal: 120,
+            fcmToken: nil,
+            updatedAt: nil
+        )
+
+        XCTAssertEqual(
+            LeaderboardXP.displayedXP(for: player, selectedCommunityIds: ["c1", "c3"]),
+            22
+        )
+        XCTAssertEqual(
+            LeaderboardXP.displayedXP(for: player, selectedCommunityIds: []),
+            62
+        )
+    }
+
     private func makeCommunity(id: String, name: String) -> Community {
         Community(
             documentId: id,
