@@ -112,3 +112,63 @@ final class HomeCommunityPresentationTests: XCTestCase {
         )
     }
 }
+
+final class LegalAcceptanceTests: XCTestCase {
+    func testOnlyBothExplicitAcceptancesUnlockContinuation() {
+        for eula in [false, true] {
+            for privacy in [false, true] {
+                let draft = LegalAcceptanceDraft(acceptsEULA: eula, acceptsPrivacyPolicy: privacy)
+                XCTAssertEqual(draft.canContinue, eula && privacy)
+            }
+        }
+    }
+
+    func testIncompleteAcceptanceCannotBePersisted() {
+        withIsolatedDefaults { defaults in
+            XCTAssertFalse(DeviceLegalAcceptance.record(LegalAcceptanceDraft(acceptsEULA: true), in: defaults))
+            XCTAssertFalse(DeviceLegalAcceptance.record(LegalAcceptanceDraft(acceptsPrivacyPolicy: true), in: defaults))
+            XCTAssertFalse(DeviceLegalAcceptance.hasAcceptedCurrentVersion(in: defaults))
+            XCTAssertNil(defaults.string(forKey: DeviceLegalAcceptance.eulaVersionKey))
+            XCTAssertNil(defaults.string(forKey: DeviceLegalAcceptance.privacyPolicyVersionKey))
+        }
+    }
+
+    func testLegacyAppRulesAcceptanceDoesNotCountAsPrivacyAcceptance() {
+        withIsolatedDefaults { defaults in
+            defaults.set(DeviceLegalAcceptance.currentAcceptanceValue, forKey: DeviceLegalAcceptance.eulaVersionKey)
+            defaults.set(DeviceLegalAcceptance.currentAcceptanceValue, forKey: "acceptedAppRulesVersion")
+            XCTAssertFalse(DeviceLegalAcceptance.hasAcceptedCurrentVersion(in: defaults))
+        }
+    }
+
+    func testBothAcceptancesPersistButNewConnectionStartsUnchecked() {
+        withIsolatedDefaults { defaults in
+            let accepted = LegalAcceptanceDraft(acceptsEULA: true, acceptsPrivacyPolicy: true)
+            XCTAssertTrue(DeviceLegalAcceptance.record(accepted, in: defaults))
+            XCTAssertTrue(DeviceLegalAcceptance.hasAcceptedCurrentVersion(in: defaults))
+            XCTAssertFalse(LegalAcceptanceDraft().canContinue)
+            defaults.set("old-version", forKey: DeviceLegalAcceptance.privacyPolicyVersionKey)
+            XCTAssertFalse(DeviceLegalAcceptance.hasAcceptedCurrentVersion(in: defaults))
+        }
+    }
+
+    private func withIsolatedDefaults(_ body: (UserDefaults) -> Void) {
+        let suite = "LegalAcceptanceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        body(defaults)
+    }
+}
+
+final class PrivacyPolicyLinkTests: XCTestCase {
+    func testEveryAppLanguageIsIncludedInThePrivacyPolicyLink() {
+        let cases: [(AppLanguage, String)] = [(.french, "fr"), (.english, "en"), (.spanish, "es"), (.german, "de"), (.italian, "it"), (.portuguese, "pt"), (.system, "fr")]
+        for (language, code) in cases {
+            let url = AppExternalLinks.privacyPolicy(language: language)
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            XCTAssertEqual(url.host, "torpille-38783.web.app")
+            XCTAssertEqual(url.path, "/privacy.html")
+            XCTAssertEqual(components?.queryItems, [URLQueryItem(name: "lang", value: code)])
+        }
+    }
+}

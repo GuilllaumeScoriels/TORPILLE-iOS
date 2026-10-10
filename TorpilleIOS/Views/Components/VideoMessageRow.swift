@@ -3,6 +3,7 @@ import SwiftUI
 struct VideoMessageRow: View {
     let message: Message
     let onPlay: () -> Void
+    @EnvironmentObject private var languageService: AppLanguageService
 
     var body: some View {
         Button(action: onPlay) {
@@ -15,7 +16,7 @@ struct VideoMessageRow: View {
                         .foregroundStyle(.blue)
                 }
                 Spacer()
-                Label("Lire", systemImage: "play.circle.fill")
+                Label(languageService.phrase("Lire"), systemImage: "play.circle.fill")
                     .labelStyle(.titleAndIcon)
             }
             .padding(12)
@@ -29,21 +30,22 @@ struct VideoMessageRow: View {
         if let taggedPseudo = message.taggedPseudo, !taggedPseudo.isEmpty {
             return "Vidéo → @\(taggedPseudo)"
         }
-        return "Vidéo"
+        return languageService.phrase("Vidéo")
     }
 }
 
 struct ImageMessageRow: View {
     let message: Message
     let onTap: () -> Void
+    @EnvironmentObject private var languageService: AppLanguageService
 
     var body: some View {
         Button(action: onTap) {
             HStack {
-                Label("Photo", systemImage: "photo.fill")
+                Label(languageService.phrase("Photo"), systemImage: "photo.fill")
                     .foregroundStyle(.primary)
                 Spacer()
-                Text("Ouvrir")
+                Text(languageService.phrase("Ouvrir"))
                     .font(.subheadline.weight(.semibold))
             }
             .padding(12)
@@ -58,6 +60,7 @@ struct AudioMessageRow: View {
     let message: Message
     let isPlaying: Bool
     let onPlay: () -> Void
+    @EnvironmentObject private var languageService: AppLanguageService
 
     var body: some View {
         Button(action: onPlay) {
@@ -67,7 +70,7 @@ struct AudioMessageRow: View {
                     .foregroundStyle(isPlaying ? .red : .green)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Vocal de \(message.senderPseudo)")
+                    Text(languageService.voiceFromLabel(message.senderPseudo))
                         .foregroundStyle(.primary)
                     Text(durationText)
                         .font(.caption)
@@ -76,7 +79,7 @@ struct AudioMessageRow: View {
 
                 Spacer()
 
-                Text(isPlaying ? "Arrêter" : "Lire")
+                Text(languageService.phrase(isPlaying ? "Arrêter" : "Lire"))
                     .font(.subheadline.weight(.semibold))
             }
             .padding(12)
@@ -88,7 +91,7 @@ struct AudioMessageRow: View {
 
     private var durationText: String {
         guard let seconds = message.audioDurationSeconds else {
-            return "Durée inconnue"
+            return languageService.phrase("Durée inconnue")
         }
         let total = max(Int(seconds.rounded()), 0)
         let minutes = total / 60

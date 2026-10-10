@@ -1,5 +1,52 @@
 import SwiftUI
 import PhotosUI
+import UIKit
+import ImageIO
+
+private actor ProfileAvatarImagePipeline {
+    static let shared = ProfileAvatarImagePipeline()
+
+    private let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 160
+        cache.totalCostLimit = 16 * 1024 * 1024
+        return cache
+    }()
+    private var requests: [String: Task<UIImage?, Never>] = [:]
+
+    func image(for url: URL) async -> UIImage? {
+        let key = url.absoluteString
+        if let cached = cache.object(forKey: key as NSString) { return cached }
+        if let request = requests[key] { return await request.value }
+
+        let request = Task<UIImage?, Never> {
+            var urlRequest = URLRequest(url: url)
+            urlRequest.cachePolicy = .returnCacheDataElseLoad
+            guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),
+                  ((response as? HTTPURLResponse)?.statusCode ?? 200) < 400,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+                return nil
+            }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 320,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            return UIImage(cgImage: thumbnail)
+        }
+        requests[key] = request
+        let image = await request.value
+        requests[key] = nil
+        if let image, let cgImage = image.cgImage {
+            cache.setObject(image, forKey: key as NSString, cost: cgImage.bytesPerRow * cgImage.height)
+        }
+        return image
+    }
+}
 
 struct ProfileIconLibrary {
     static let featuredIcons = [
@@ -49,12 +96,13 @@ struct ProfileIconLibrary {
 struct ProfileIconPicker: View {
     @Binding var selectedIcon: String
     @State private var customEmoji = ""
+    @EnvironmentObject private var languageService: AppLanguageService
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Emoji personnalisé", text: $customEmoji)
+            TextField(languageService.phrase("Emoji personnalisé"), text: $customEmoji)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .onChange(of: customEmoji) { _, newValue in
@@ -63,7 +111,7 @@ struct ProfileIconPicker: View {
                     customEmoji = emoji
                 }
 
-            Text("Tu peux choisir dans la liste ou saisir n'importe quel emoji avec le clavier emoji iOS.")
+            Text(languageService.phrase("Tu peux choisir dans la liste ou saisir n'importe quel emoji avec le clavier emoji iOS."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -87,7 +135,7 @@ struct ProfileIconPicker: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Icône \(icon)")
+                        .accessibilityLabel(languageService.iconAccessibilityLabel(icon))
                     }
                 }
                 .padding(.vertical, 4)
@@ -134,6 +182,9 @@ struct ProfileAvatarImageView: View {
     let photoURL: String?
     let fallbackSymbol: String
     let size: CGFloat
+    var fallbackIcon: String? = nil
+    @State private var remoteImage: UIImage?
+    @State private var didFinishLoadingImage = false
 
     var body: some View {
         Group {
@@ -145,12 +196,19 @@ struct ProfileAvatarImageView: View {
             } else if let photoURL,
                       let url = URL(string: photoURL),
                       !photoURL.isEmpty {
-                AsyncImage(url: url) { image in
-                    image
+                if let remoteImage {
+                    Image(uiImage: remoteImage)
                         .resizable()
                         .scaledToFill()
-                } placeholder: {
-                    placeholder
+                } else {
+                    Group {
+                        if didFinishLoadingImage { placeholder }
+                        else { TorpilleLoadingView() }
+                    }
+                    .task(id: photoURL) {
+                        remoteImage = await ProfileAvatarImagePipeline.shared.image(for: url)
+                        didFinishLoadingImage = true
+                    }
                 }
             } else {
                 placeholder
@@ -159,15 +217,24 @@ struct ProfileAvatarImageView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay(Circle().stroke(Color.secondary.opacity(0.22), lineWidth: 1))
+        .onChange(of: photoURL) { _, _ in
+            remoteImage = nil
+            didFinishLoadingImage = false
+        }
     }
 
     private var placeholder: some View {
         ZStack {
             Circle()
                 .fill(Color.secondary.opacity(0.12))
-            Image(systemName: fallbackSymbol)
-                .font(.system(size: size * 0.36, weight: .medium))
-                .foregroundStyle(.secondary)
+            if let fallbackIcon, !fallbackIcon.isEmpty {
+                Text(fallbackIcon)
+                    .font(.system(size: size * 0.48))
+            } else {
+                Image(systemName: fallbackSymbol)
+                    .font(.system(size: size * 0.36, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -175,11 +242,14 @@ struct ProfileAvatarImageView: View {
 struct ProfilePhotoPicker: View {
     @Binding var selectedImageData: Data?
     @State private var selectedItem: PhotosPickerItem?
+    @EnvironmentObject private var languageService: AppLanguageService
 
     var body: some View {
+        let photoPickerTitle = languageService.phrase(selectedImageData == nil ? "Choisir une photo" : "Remplacer la photo")
+
         VStack(alignment: .leading, spacing: 10) {
             PhotosPicker(selection: $selectedItem, matching: .images) {
-                Label(selectedImageData == nil ? "Choisir une photo" : "Remplacer la photo", systemImage: "photo")
+                Label(photoPickerTitle, systemImage: "photo")
             }
             .buttonStyle(.borderedProminent)
 
@@ -188,11 +258,11 @@ struct ProfilePhotoPicker: View {
                     selectedItem = nil
                     selectedImageData = nil
                 } label: {
-                    Label("Retirer la photo sélectionnée", systemImage: "trash")
+                    Label(languageService.phrase("Retirer la photo sélectionnée"), systemImage: "trash")
                 }
             }
 
-            Text("Formats recommandés : JPG ou PNG.")
+            Text(languageService.phrase("Formats recommandés : JPG ou PNG."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -206,5 +276,20 @@ struct ProfilePhotoPicker: View {
                 selectedImageData = nil
             }
         }
+    }
+}
+
+struct ProfileSexPicker: View {
+    @Binding var selection: ProfileSex?
+    @EnvironmentObject private var languageService: AppLanguageService
+
+    var body: some View {
+        Picker(languageService.phrase("Sexe"), selection: $selection) {
+            Text(languageService.phrase("Non renseigné")).tag(nil as ProfileSex?)
+            ForEach(ProfileSex.allCases) { value in
+                Text(languageService.phrase(value.label)).tag(Optional(value))
+            }
+        }
+        .pickerStyle(.menu)
     }
 }

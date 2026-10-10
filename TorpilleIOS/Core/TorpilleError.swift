@@ -20,6 +20,7 @@ enum TorpilleError: LocalizedError {
     case notAuthenticated
     case missingData(String)
     case invalidPseudo
+    case pseudoAlreadyUsed
     case invalidResponseTime
     case videoNotAvailable
     case locationUnavailable
@@ -33,6 +34,8 @@ enum TorpilleError: LocalizedError {
             return message
         case .invalidPseudo:
             return "Le pseudo doit contenir entre 3 et 20 caractères et n'utiliser que des lettres, chiffres, _ ou ."
+        case .pseudoAlreadyUsed:
+            return "Ce pseudo est déjà utilisé par un autre utilisateur. Choisis un autre pseudo pour continuer."
         case .invalidResponseTime:
             return "Le temps de réponse doit être un nombre entier positif."
         case .videoNotAvailable:

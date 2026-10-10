@@ -83,12 +83,9 @@ Depuis le dossier `Hosting/` :
 firebase deploy --only hosting
 ```
 
-### Point à modifier avant mise en production
+### Liens de téléchargement configurés
 
-Dans `Hosting/public/join.html`, remplace :
+- iPhone : https://apps.apple.com/fr/app/torpille/id6761060711 — fiche Torpille vérifiée dans le catalogue Apple pour `com.torpille.ios`.
+- Android : https://torpille-android-38783.web.app/ — page de téléchargement de l’APK de test.
 
-`https://apps.apple.com/app/id0000000000`
-
-par l’URL réelle App Store de ton application iOS.
-
-Tu peux aussi ajuster le lien Android si ton identifiant Play Store final diffère de `com.torpille.android`.
+La page d’invitation conserve `cid` et la langue dans le lien Android. La page Android permet de revenir à cette même invitation après l’installation. Les liens d’invitation existants et nouveaux utilisent la même page publiée.

@@ -26,6 +26,7 @@
 		8BC2597AE67620D04F9412FA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9310DBDF1730EFF6694DFF94 /* Models.swift */; };
 		92F865CE39DB533D972A5237 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */; };
 		9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */; };
+		A10000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* PrivacyInfo.xcprivacy */; };
 		B418C8F86BB63820EBC4E650 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B005BC818E2052555FCF569 /* AppLanguage.swift */; };
 		B6906EC5295FA2E88C402FBF /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = DA78468648A664FA37256F9E /* FirebaseFirestore */; };
 		BDCCF4CEB788300A63842E5F /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 39C1F1C0C89D781886FDFB60 /* FirebaseMessaging */; };
@@ -73,6 +74,7 @@
 		9310DBDF1730EFF6694DFF94 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		95EACA6D577C51EE7ABC6053 /* ViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels.swift; sourceTree = "<group>"; };
 		97FABC96850C8A8191A37628 /* HomeAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAndProfileScreens.swift; sourceTree = "<group>"; };
+		A10000000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A361918CF4ED07DEC23766C1 /* AuthAndProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthAndProfileScreens.swift; sourceTree = "<group>"; };
 		B00F1DE4C55E8C0F81934768 /* CommunityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityScreen.swift; sourceTree = "<group>"; };
 		B278BC9EEADDD55481644665 /* TorpilleIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TorpilleIOS.entitlements; sourceTree = "<group>"; };
@@ -219,6 +221,7 @@
 			children = (
 				7CF9380A20A6DDDE15280E09 /* Assets.xcassets */,
 				2EC57E693A36D9076F6ACD7A /* GoogleService-Info.plist */,
+				A10000000000000000000001 /* PrivacyInfo.xcprivacy */,
 				74F2CE85C47077B0755CDEC0 /* Info.plist */,
 			);
 			path = Resources;
@@ -310,6 +313,7 @@
 			files = (
 				3F40498BB3C640175217D86A /* Assets.xcassets in Resources */,
 				9FB1ED895889D72411483B33 /* GoogleService-Info.plist in Resources */,
+				A10000000000000000000002 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -428,7 +432,7 @@
 				CODE_SIGN_ENTITLEMENTS = TorpilleIOS/TorpilleIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -436,11 +440,10 @@
 				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
 				INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled = NO;
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
-				INFOPLIST_KEY_NSCameraUsageDescription = "L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Torpille utilise la caméra lorsque tu choisis de prendre une photo ou de filmer une vidéo. Par exemple, le média capturé peut être envoyé dans une communauté et sera alors visible par ses membres.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Torpille utilise ta position lorsque tu ouvres la carte ou désactives le mode fantôme, afin d’afficher ta dernière position aux membres de tes communautés. Par exemple, après l’ouverture de la carte, ces membres peuvent voir l’endroit de ta dernière mise à jour. Tu peux arrêter ce partage avec le mode fantôme.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Torpille utilise le microphone lorsque tu enregistres un message vocal ou une vidéo avec du son. Par exemple, cet enregistrement peut être envoyé dans une communauté et écouté par ses membres.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Torpille accède aux photos et vidéos que tu sélectionnes afin de définir ta photo de profil ou de partager un média dans une communauté. Par exemple, une vidéo sélectionnée sera téléversée et visible par les membres de cette communauté.";
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -449,11 +452,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0.5;
 				PRODUCT_NAME = TorpilleIOS;
 				SDKROOT = iphoneos;
 				STRIP_INSTALLED_PRODUCT = NO;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -468,7 +471,7 @@
 					"@loader_path/Frameworks",
 				);
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TorpilleIOS.app/TorpilleIOS";
 			};
 			name = Debug;
@@ -544,7 +547,7 @@
 				CODE_SIGN_ENTITLEMENTS = TorpilleIOS/TorpilleIOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = BBYGKJS8JX;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -552,11 +555,10 @@
 				INFOPLIST_KEY_CFBundleURLTypes = "[[\"CFBundleTypeRole\": \"Editor\", \"CFBundleURLSchemes\": [\"torpille\"], \"CFBundleURLName\": \"com.torpille.deeplink\"]]";
 				INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled = NO;
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "https torpille";
-				INFOPLIST_KEY_NSCameraUsageDescription = "L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "L'application a besoin du micro pour enregistrer des messages vocaux.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Torpille utilise la caméra lorsque tu choisis de prendre une photo ou de filmer une vidéo. Par exemple, le média capturé peut être envoyé dans une communauté et sera alors visible par ses membres.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Torpille utilise ta position lorsque tu ouvres la carte ou désactives le mode fantôme, afin d’afficher ta dernière position aux membres de tes communautés. Par exemple, après l’ouverture de la carte, ces membres peuvent voir l’endroit de ta dernière mise à jour. Tu peux arrêter ce partage avec le mode fantôme.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Torpille utilise le microphone lorsque tu enregistres un message vocal ou une vidéo avec du son. Par exemple, cet enregistrement peut être envoyé dans une communauté et écouté par ses membres.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Torpille accède aux photos et vidéos que tu sélectionnes afin de définir ta photo de profil ou de partager un média dans une communauté. Par exemple, une vidéo sélectionnée sera téléversée et visible par les membres de cette communauté.";
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -565,11 +567,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0.5;
 				PRODUCT_NAME = TorpilleIOS;
 				SDKROOT = iphoneos;
 				STRIP_INSTALLED_PRODUCT = NO;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -584,7 +586,7 @@
 					"@loader_path/Frameworks",
 				);
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TorpilleIOS.app/TorpilleIOS";
 			};
 			name = Release;

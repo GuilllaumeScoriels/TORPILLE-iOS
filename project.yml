@@ -32,11 +32,10 @@ targets:
         INFOPLIST_KEY_LSApplicationQueriesSchemes:
           - https
           - torpille
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: La carte des torpilleurs a besoin de ta position pour afficher la dernière localisation connue.
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: L'application a besoin de la photothèque pour choisir une photo de profil et sélectionner une vidéo à envoyer.
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: L'application a besoin du micro pour enregistrer des messages vocaux.
-        INFOPLIST_KEY_NSCameraUsageDescription: L'application a besoin de la caméra pour filmer des torpilles et envoyer des photos ou vidéos dans la communauté.
-        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: L'application peut enregistrer temporairement des captures pour préparer l'envoi des médias.
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Torpille utilise ta position lorsque tu ouvres la carte ou désactives le mode fantôme, afin d’afficher ta dernière position aux membres de tes communautés. Par exemple, après l’ouverture de la carte, ces membres peuvent voir l’endroit de ta dernière mise à jour. Tu peux arrêter ce partage avec le mode fantôme.
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Torpille accède aux photos et vidéos que tu sélectionnes afin de définir ta photo de profil ou de partager un média dans une communauté. Par exemple, une vidéo sélectionnée sera téléversée et visible par les membres de cette communauté.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Torpille utilise le microphone lorsque tu enregistres un message vocal ou une vidéo avec du son. Par exemple, cet enregistrement peut être envoyé dans une communauté et écouté par ses membres.
+        INFOPLIST_KEY_NSCameraUsageDescription: Torpille utilise la caméra lorsque tu choisis de prendre une photo ou de filmer une vidéo. Par exemple, le média capturé peut être envoyé dans une communauté et sera alors visible par ses membres.
         INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled: NO
         INFOPLIST_KEY_UIBackgroundModes:
           - remote-notification

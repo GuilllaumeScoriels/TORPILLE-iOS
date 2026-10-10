@@ -11,6 +11,16 @@
 
 import Foundation
 import FirebaseFirestore
+import SwiftUI
+
+enum AppExternalLinks {
+    static func privacyPolicy(language: AppLanguage) -> URL {
+        var components = URLComponents(string: "https://torpille-38783.web.app/privacy.html")!
+        components.queryItems = [URLQueryItem(name: "lang", value: language.localeIdentifier)]
+        return components.url!
+    }
+    static let support = URL(string: "https://torpille-38783.web.app/support.html")!
+}
 
 extension String {
     var normalizedPseudoKey: String {
@@ -47,6 +57,37 @@ extension Member {
     }
 
     var mapLastTorpilleTimeText: String {
-        lastTorpilledAt?.formattedHourMinute ?? "--:--"
+        guard let sentTimestamp = lastTorpilleSentAt else {
+            return ""
+        }
+
+        let elapsedTime = Date().timeIntervalSince(sentTimestamp.dateValue())
+        guard elapsedTime >= 0, elapsedTime < 24 * 60 * 60 else { return "" }
+        return sentTimestamp.formattedHourMinute
+    }
+}
+
+private struct IOSBackSwipeModifier: ViewModifier {
+    let isEnabled: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local)
+                .onEnded { value in
+                    guard isEnabled else { return }
+                    let startedNearLeadingEdge = value.startLocation.x <= 32
+                    let isHorizontalBackSwipe = value.translation.width >= 70
+                        && abs(value.translation.height) <= 80
+                    guard startedNearLeadingEdge && isHorizontalBackSwipe else { return }
+                    action()
+                }
+        )
+    }
+}
+
+extension View {
+    func iosBackSwipe(enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        modifier(IOSBackSwipeModifier(isEnabled: enabled, action: action))
     }
 }

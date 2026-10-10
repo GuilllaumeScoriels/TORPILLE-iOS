@@ -1,0 +1,31 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const html = fs.readFileSync(path.join(__dirname, '../Hosting/public/privacy.html'), 'utf8');
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const keys = [...html.matchAll(/data-i18n="([^"]+)"/g)].map(m => m[1]);
+const titles = { fr: 'Politique de confidentialité de Torpille', en: 'Torpille privacy policy', es: 'Política de privacidad de Torpille', de: 'Datenschutzerklärung von Torpille', it: 'Informativa sulla privacy di Torpille', pt: 'Política de privacidade do Torpille' };
+function render(search, browserLanguage, expected) {
+  const elements = keys.map(key => ({ dataset: { i18n: key }, textContent: '' }));
+  const meta = {};
+  const document = { documentElement: {}, querySelector: () => meta, querySelectorAll: () => elements };
+  const context = vm.createContext({document, window: {location: {search}}, navigator: {language: browserLanguage}, URLSearchParams});
+  vm.runInContext(script, context);
+  assert.equal(document.documentElement.lang, expected);
+  assert.equal(document.title, titles[expected]);
+  assert.equal(meta.content, titles[expected]);
+  assert.ok(elements.every(el => typeof el.textContent === 'string' && el.textContent.trim()));
+  const translations = vm.runInContext('privacyTranslations', context);
+  for (const language of Object.keys(titles)) assert.deepEqual(Object.keys(translations[language]).sort(), [...keys].sort());
+  assert.equal(elements.find(el => el.dataset.i18n === 'text23').textContent, 'torpille.app@gmail.com');
+}
+for (const language of Object.keys(titles)) render(`?lang=${language}`, language === 'fr' ? 'en-US' : 'fr-FR', language);
+render('?lang=pt-BR', 'en-US', 'pt');
+render('?lang=unknown', 'en-US', 'fr');
+render('?lang=__proto__', 'en-US', 'fr');
+render('', 'de-DE', 'de');
+render('', 'ja-JP', 'fr');
+assert.ok(html.includes('href="mailto:torpille.app@gmail.com"'));
+assert.ok(html.includes('href="/support.html"'));
+console.log('Privacy policy: 6 languages, explicit language priority, regional codes, fallbacks and links verified.');

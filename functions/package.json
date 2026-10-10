@@ -5,8 +5,13 @@
     "node": "20"
   },
   "main": "index.js",
+  "scripts": {
+    "cleanup:profile-images": "node scripts/cleanup-profile-images.js",
+    "cleanup:duplicate-users": "node scripts/cleanup-duplicate-users.js"
+  },
   "dependencies": {
     "firebase-admin": "^12.1.1",
-    "firebase-functions": "^6.0.1"
+    "firebase-functions": "^6.0.1",
+    "nodemailer": "^6.10.1"
   }
 }

@@ -11,21 +11,6 @@ service firebase.storage {
         && request.auth.token.email_verified == true;
     }
 
-    function isCommunityAdmin(communityId) {
-      return isSignedIn()
-        && exists(/databases/(default)/documents/communities/$(communityId))
-        && get(/databases/(default)/documents/communities/$(communityId)).data.adminUid == request.auth.uid;
-    }
-
-    function isCommunityMember(communityId) {
-      return isSignedIn()
-        && exists(/databases/(default)/documents/communities/$(communityId)/members/$(request.auth.uid));
-    }
-
-    function canAccessCommunityMedia(communityId) {
-      return isCommunityAdmin(communityId) || isCommunityMember(communityId);
-    }
-
     function hasUploadPayload() {
       return request.resource != null
         && request.resource.size > 0;

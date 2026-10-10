@@ -6,14 +6,14 @@ import FirebaseFunctions
 import FirebaseMessaging
 import FirebaseStorage
 
-private enum CommunityCreationStep: String {
+enum CommunityCreationStep: String {
     case refreshToken = "refresh-token"
     case createCommunityDocument = "create-community-document"
     case createAdminMembership = "create-admin-membership"
     case recalculateTotalXP = "recalculate-total-xp"
 }
 
-private enum OperationDiagnostics {
+enum OperationDiagnostics {
     static func message(for step: CommunityCreationStep, error: Error) -> String {
         let nsError = error as NSError
         var lines: [String] = [
@@ -73,6 +73,19 @@ private func debugDescribe(_ error: Error) -> String {
         print("domain =", nsError.domain)
         print("code =", nsError.code)
         print("userInfo =", nsError.userInfo)
+    }
+
+    private final class CompositeListenerRegistration: NSObject, ListenerRegistration {
+        private var registrations: [ListenerRegistration]
+
+        init(_ registrations: [ListenerRegistration]) {
+            self.registrations = registrations
+        }
+
+        func remove() {
+            registrations.forEach { $0.remove() }
+            registrations.removeAll()
+        }
     }
 
     private func stringArrayValue(from rawValue: Any?) -> [String] {
@@ -138,10 +151,26 @@ private enum BasicContentFilter {
     ]
 
     static func validate(_ text: String) throws {
-        let normalized = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-        if blockedTerms.contains(where: { normalized.contains($0) }) {
+        let normalized = normalizedForModeration(text)
+        let compact = normalized.filter(\.isLetter)
+        if blockedTerms.contains(where: { term in
+            let normalizedTerm = normalizedForModeration(term)
+            return normalized.contains(normalizedTerm)
+                || compact.contains(normalizedTerm.filter(\.isLetter))
+        }) {
             throw TorpilleError.missingData("Ce contenu ne respecte pas les règles de la communauté.")
         }
+    }
+
+    private static func normalizedForModeration(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "0", with: "o")
+            .replacingOccurrences(of: "1", with: "i")
+            .replacingOccurrences(of: "3", with: "e")
+            .replacingOccurrences(of: "4", with: "a")
+            .replacingOccurrences(of: "5", with: "s")
+            .replacingOccurrences(of: "7", with: "t")
     }
 }
 
@@ -184,11 +213,11 @@ final class AuthRepository {
         try await user.reload()
     }
 
-    func refreshIDToken() async throws {
+    func refreshIDToken(forcingRefresh: Bool = true) async throws {
         guard let user = auth.currentUser else {
             throw TorpilleError.notAuthenticated
         }
-        _ = try await user.getIDTokenResult(forcingRefresh: true)
+        _ = try await user.getIDTokenResult(forcingRefresh: forcingRefresh)
     }
 
     func signIn(email: String, password: String) async throws {
@@ -217,10 +246,18 @@ final class AuthRepository {
 
     func deleteCurrentUser() async throws {
         guard let user = auth.currentUser else {
-            throw TorpilleError.notAuthenticated
+            return
         }
-        try await user.delete()
-        try auth.signOut()
+        do {
+            try await user.delete()
+        } catch {
+            let nsError = error as NSError
+            guard nsError.domain == AuthErrorDomain,
+                  nsError.code == AuthErrorCode.userNotFound.rawValue else {
+                throw error
+            }
+        }
+        try? auth.signOut()
     }
 }
 
@@ -238,6 +275,16 @@ final class UserRepository {
     private var communities: CollectionReference { db.collection("communities") }
 
 
+    private func doubleValue(from rawValue: Any?) -> Double? {
+        if let value = rawValue as? Double { return value }
+        if let value = rawValue as? NSNumber { return value.doubleValue }
+        return nil
+    }
+
+    private func timestampValue(from rawValue: Any?) -> Timestamp? {
+        rawValue as? Timestamp
+    }
+
 
     private func decodeUserProfile(from snapshot: DocumentSnapshot, fallbackUID: String) -> UserProfile {
         let data = snapshot.data() ?? [:]
@@ -245,6 +292,8 @@ final class UserRepository {
             documentId: snapshot.documentID,
             uid: (data["uid"] as? String) ?? fallbackUID,
             email: (data["email"] as? String) ?? auth.currentUser?.email,
+            firstName: (data["firstName"] as? String) ?? "",
+            lastName: (data["lastName"] as? String) ?? "",
             pseudo: (data["pseudo"] as? String) ?? "",
             pseudoKey: (data["pseudoKey"] as? String) ?? "",
             photoUrl: data["photoUrl"] as? String,
@@ -257,7 +306,15 @@ final class UserRepository {
             languageCode: data["languageCode"] as? String,
             isLanguagePublic: (data["isLanguagePublic"] as? Bool) ?? true,
             isLeaderboardPublic: (data["isLeaderboardPublic"] as? Bool) ?? true,
+            isGhostMode: (data["isGhostMode"] as? Bool) ?? false,
             friendsCount: (data["friendsCount"] as? Int) ?? (data["friendsCount"] as? NSNumber)?.intValue ?? 0,
+            birthDate: timestampValue(from: data["birthDate"]),
+            sex: (data["sex"] as? String).flatMap(ProfileSex.init(rawValue:)),
+            city: data["city"] as? String,
+            bio: data["bio"] as? String,
+            lastLatitude: doubleValue(from: data["lastLatitude"]),
+            lastLongitude: doubleValue(from: data["lastLongitude"]),
+            lastLocationUpdatedAt: timestampValue(from: data["lastLocationUpdatedAt"]),
             termsAcceptedAt: data["termsAcceptedAt"] as? Timestamp,
             moderationRulesAcceptedAt: data["moderationRulesAcceptedAt"] as? Timestamp,
             updatedAt: data["updatedAt"] as? Timestamp
@@ -295,13 +352,15 @@ final class UserRepository {
         try await communityReference.delete()
     }
 
-    private func deleteProfileImageIfNeeded(photoURL: String?) async {
+    private func deleteProfileImageIfNeeded(photoURL: String?, preservingPath: String? = nil) async {
         guard let photoURL, !photoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
         do {
-            try await Storage.storage().reference(forURL: photoURL).delete()
+            let reference = Storage.storage().reference(forURL: photoURL)
+            guard reference.fullPath != preservingPath else { return }
+            try await reference.delete()
         } catch {
             debugLog("UserRepository.deleteProfileImageIfNeeded failed", error)
         }
@@ -338,7 +397,7 @@ final class UserRepository {
         do {
             let snapshot = try await users.document(uid).getDocument()
             guard snapshot.exists else {
-                throw TorpilleError.missingData("Profil introuvable")
+                throw TorpilleError.missingData("Ton profil n’est pas encore configuré. Complète les informations obligatoires et accepte l’EULA pour continuer.")
             }
             return decodeUserProfile(from: snapshot, fallbackUID: uid)
         } catch {
@@ -394,7 +453,7 @@ final class UserRepository {
         }
     }
 
-    func upsertProfile(pseudo: String, photoURL: String?, profileIcon: String?) async throws {
+    func upsertProfile(firstName: String, lastName: String, pseudo: String, birthDate: Date?, sex: ProfileSex?, city: String, bio: String, photoURL: String?, profileIcon: String?, acceptsTerms: Bool) async throws {
         guard let uid = auth.currentUser?.uid else {
             throw TorpilleError.notAuthenticated
         }
@@ -404,6 +463,21 @@ final class UserRepository {
         print("👤 pseudo =", pseudo)
         print("👤 photoURL =", photoURL ?? "nil")
         print("👤 profileIcon =", profileIcon ?? "nil")
+
+        let cleanFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (2...50).contains(cleanFirstName.count), (2...50).contains(cleanLastName.count) else {
+            throw TorpilleError.missingData("Renseigne un prénom et un nom valides pour compléter ton profil.")
+        }
+        guard cleanCity.count <= 100, cleanBio.count <= 300 else {
+            throw TorpilleError.missingData("La ville est limitée à 100 caractères et la présentation à 300 caractères.")
+        }
+        if let birthDate, birthDate > Date() {
+            throw TorpilleError.missingData("La date de naissance ne peut pas être dans le futur.")
+        }
+        try BasicContentFilter.validate([cleanFirstName, cleanLastName, cleanCity, cleanBio].joined(separator: " "))
 
         let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
         try BasicContentFilter.validate(clean)
@@ -446,18 +520,39 @@ final class UserRepository {
 
         var payload: [String: Any] = [
             "uid": uid,
+            "firstName": cleanFirstName,
+            "lastName": cleanLastName,
             "pseudo": clean,
             "pseudoKey": pseudoKey,
             "communityIds": CommunityMembershipStore.normalizedIDs(from: existingData["communityIds"]),
             "communityXP": existingCommunityXP,
             "xptotal": existingXPTotal,
             "xpTotal": existingXPTotal,
-            "termsAcceptedAt": alreadyAcceptedTerms ?? now,
-            "moderationRulesAcceptedAt": alreadyAcceptedRules ?? now,
             "isLanguagePublic": existingData["isLanguagePublic"] as? Bool ?? true,
             "isLeaderboardPublic": existingData["isLeaderboardPublic"] as? Bool ?? true,
             "updatedAt": now
         ]
+
+        if let birthDate {
+            payload["birthDate"] = Timestamp(date: birthDate)
+        } else if let existingBirthDate = existingData["birthDate"] as? Timestamp {
+            payload["birthDate"] = existingBirthDate
+        }
+        payload["sex"] = sex.map { $0.rawValue as Any } ?? NSNull()
+        payload["city"] = cleanCity
+        payload["bio"] = cleanBio
+
+        if let alreadyAcceptedTerms {
+            payload["termsAcceptedAt"] = alreadyAcceptedTerms
+        } else if acceptsTerms {
+            payload["termsAcceptedAt"] = now
+        }
+
+        if let alreadyAcceptedRules {
+            payload["moderationRulesAcceptedAt"] = alreadyAcceptedRules
+        } else if acceptsTerms {
+            payload["moderationRulesAcceptedAt"] = now
+        }
 
         if let currentEmail, !currentEmail.isEmpty {
             payload["email"] = currentEmail
@@ -488,7 +583,7 @@ final class UserRepository {
                         let error = NSError(
                             domain: "UserRepository",
                             code: 409,
-                            userInfo: [NSLocalizedDescriptionKey: "Ce pseudo est déjà utilisé."]
+                            userInfo: [NSLocalizedDescriptionKey: TorpilleError.pseudoAlreadyUsed.localizedDescription]
                         )
                         errorPointer?.pointee = error
                         return nil
@@ -516,11 +611,35 @@ final class UserRepository {
             }
         } catch {
             debugLog("UserRepository.upsertProfile transaction failed", error)
+            let nsError = error as NSError
+            if nsError.domain == "UserRepository" && nsError.code == 409 {
+                throw TorpilleError.pseudoAlreadyUsed
+            }
             throw error
         }
     }
 
-    func updateProfile(pseudo: String, imageData: Data?, profileIcon: String?) async throws {
+    private func ensurePseudoIsAvailable(_ pseudo: String) async throws {
+        guard let uid = auth.currentUser?.uid else {
+            throw TorpilleError.notAuthenticated
+        }
+
+        let clean = pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count >= 3,
+              clean.count <= 20,
+              clean.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }) else {
+            throw TorpilleError.invalidPseudo
+        }
+
+        let reservation = try await pseudos.document(clean.normalizedPseudoKey).getDocument()
+        if reservation.exists,
+           let owner = reservation.data()?["uid"] as? String,
+           owner != uid {
+            throw TorpilleError.pseudoAlreadyUsed
+        }
+    }
+
+    func updateProfile(firstName: String, lastName: String, pseudo: String, birthDate: Date?, sex: ProfileSex?, city: String, bio: String, imageData: Data?, profileIcon: String?, acceptsTerms: Bool = false) async throws {
         print("📍 UserRepository.updateProfile")
         print("👤 auth uid =", auth.currentUser?.uid ?? "nil")
         print("👤 auth email =", auth.currentUser?.email ?? "nil")
@@ -528,20 +647,27 @@ final class UserRepository {
         print("👤 has imageData =", imageData != nil)
         print("👤 profileIcon =", profileIcon ?? "nil")
 
-        var uploadedURL: String?
+        try await ensurePseudoIsAvailable(pseudo)
 
-        if let imageData, let uid = auth.currentUser?.uid {
+        let uid = auth.currentUser?.uid
+        let previousPhotoURL: String?
+        if let uid {
+            previousPhotoURL = try? await users.document(uid).getDocument().data()?["photoUrl"] as? String
+        } else {
+            previousPhotoURL = nil
+        }
+
+        var uploadedImage: UploadedImage?
+
+        if let imageData, let uid {
             print("🖼 image byteCount =", imageData.count)
             let compressed = normalizedProfileImageData(from: imageData) ?? imageData
-            let filename = "profile_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-
             do {
                 let uploaded = try await transferService.uploadProfileImage(
                     uid: uid,
-                    imageData: compressed,
-                    filename: filename
+                    imageData: compressed
                 )
-                uploadedURL = uploaded.downloadURL
+                uploadedImage = uploaded
                 print("✅ uploadProfileImage ok bucket = \(uploaded.bucket) path = \(uploaded.storagePath)")
             } catch {
                 debugLog("UserRepository.updateProfile uploadProfileImage failed", error)
@@ -550,17 +676,26 @@ final class UserRepository {
         }
 
         do {
-            try await upsertProfile(pseudo: pseudo, photoURL: uploadedURL, profileIcon: profileIcon)
+            try await upsertProfile(firstName: firstName, lastName: lastName, pseudo: pseudo, birthDate: birthDate, sex: sex, city: city, bio: bio, photoURL: uploadedImage?.downloadURL, profileIcon: profileIcon, acceptsTerms: acceptsTerms)
             print("✅ upsertProfile ok")
         } catch {
             debugLog("UserRepository.updateProfile upsertProfile failed", error)
             throw error
         }
 
+        // Once Firestore points to the new avatar (or to a profile icon), the
+        // formerly referenced timestamped object is no longer needed.
+        if uploadedImage != nil || (profileIcon?.isEmpty == false && imageData == nil) {
+            await deleteProfileImageIfNeeded(
+                photoURL: previousPhotoURL,
+                preservingPath: uploadedImage?.storagePath
+            )
+        }
+
         do {
             try await propagateProfileToCommunityMemberships(
                 pseudo: pseudo,
-                photoURL: uploadedURL,
+                photoURL: uploadedImage?.downloadURL,
                 profileIcon: profileIcon
             )
             print("✅ propagateProfileToCommunityMemberships ok")
@@ -696,13 +831,59 @@ final class UserRepository {
             }
     }
 
+    func removeFriend(_ friend: PublicFriend) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        guard !friend.uid.isEmpty, friend.uid != uid else {
+            throw TorpilleError.missingData("Cet ami ne peut pas être supprimé.")
+        }
+
+        let me = try await getMeOrThrow()
+        let batch = db.batch()
+        batch.deleteDocument(users.document(uid).collection("friends").document(friend.uid))
+        batch.deleteDocument(users.document(friend.uid).collection("friends").document(uid))
+
+        let removalReference = db.collection("friendRemovals").document()
+        batch.setData([
+            "actorUid": uid,
+            "actorPseudo": me.pseudo,
+            "toUid": friend.uid,
+            "type": "friendRemoved",
+            "createdAt": Timestamp(date: Date())
+        ], forDocument: removalReference)
+
+        try await batch.commit()
+    }
+
     func sendFriendRequest(to profile: UserProfile) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         guard profile.uid != uid else { throw TorpilleError.missingData("Tu ne peux pas t'ajouter toi-même.") }
 
+        let friendDocument = try await users.document(uid).collection("friends").document(profile.uid).getDocument()
+        guard !friendDocument.exists else {
+            throw TorpilleError.missingData("@\(profile.pseudo) fait déjà partie de tes amis.")
+        }
+
         let me = try await getMeOrThrow()
         let requestId = [uid, profile.uid].sorted().joined(separator: "_")
-        try await db.collection("friendRequests").document(requestId).setData([
+        let requestReference = db.collection("friendRequests").document(requestId)
+        let existingRequest = try await requestReference.getDocument()
+        if let data = existingRequest.data() {
+            let status = data["status"] as? String ?? ""
+            let existingFromUid = data["fromUid"] as? String ?? ""
+            if status == FriendRequestStatus.pending.rawValue {
+                if existingFromUid == uid {
+                    throw TorpilleError.missingData("Une demande d'ami est déjà en attente pour @\(profile.pseudo).")
+                }
+                throw TorpilleError.missingData("@\(profile.pseudo) t'a déjà envoyé une demande. Ouvre tes notifications pour l'accepter.")
+            }
+            if existingFromUid == uid {
+                try await requestReference.delete()
+            } else {
+                throw TorpilleError.missingData("Cette ancienne demande doit être supprimée par @\(profile.pseudo) avant un nouvel envoi.")
+            }
+        }
+
+        try await requestReference.setData([
             "fromUid": uid,
             "fromPseudo": me.pseudo,
             "fromPhotoUrl": me.photoUrl ?? "",
@@ -845,7 +1026,8 @@ final class CommunityRepository {
     private let db = Firestore.firestore()
     private let functions = Functions.functions(region: "europe-west1")
     private let videoTransfer = VideoTransferService()
-    private var messageRetentionInterval: TimeInterval { 7 * 24 * 60 * 60 }
+    private var messageRetentionInterval: TimeInterval { 14 * 24 * 60 * 60 }
+    private var torpilleRetentionInterval: TimeInterval { 14 * 24 * 60 * 60 }
 
     private var communities: CollectionReference { db.collection("communities") }
     private var users: CollectionReference { db.collection("users") }
@@ -867,6 +1049,23 @@ final class CommunityRepository {
         return Set(snapshot?.documents.map(\.documentID) ?? [])
     }
 
+    private func observeBlockedByUserIds(handler: @escaping (Set<String>) -> Void) -> ListenerRegistration? {
+        guard let uid = auth.currentUser?.uid else {
+            handler([])
+            return nil
+        }
+
+        functions.httpsCallable("syncBlockedByForMe").call { _, error in
+            if let error { debugLog("CommunityRepository.syncBlockedByForMe failed", error) }
+        }
+
+        return users.document(uid)
+            .collection("blockedBy")
+            .addSnapshotListener { snapshot, _ in
+                handler(Set(snapshot?.documents.map(\.documentID) ?? []))
+            }
+    }
+
     private func loadHiddenMemberIds(communityId: String) async -> Set<String> {
         guard let uid = auth.currentUser?.uid else { return [] }
         let snapshot = try? await users.document(uid)
@@ -877,6 +1076,21 @@ final class CommunityRepository {
         return Set(snapshot?.documents.map(\.documentID) ?? [])
     }
 
+    func observeHiddenMemberIds(communityId: String, handler: @escaping (Set<String>) -> Void) -> ListenerRegistration? {
+        guard let uid = auth.currentUser?.uid else {
+            handler([])
+            return nil
+        }
+
+        return users.document(uid)
+            .collection("contentFilters")
+            .document(communityId)
+            .collection("hiddenMembers")
+            .addSnapshotListener { snapshot, _ in
+                handler(Set(snapshot?.documents.map(\.documentID) ?? []))
+            }
+    }
+
     private func loadExcludedUserIds(communityId: String?) async -> Set<String> {
         var excluded = await loadBlockedUserIds()
         if let communityId, !communityId.isEmpty {
@@ -885,31 +1099,108 @@ final class CommunityRepository {
         return excluded
     }
 
+    private func observeExcludedUserIds(communityId: String?, handler: @escaping (Set<String>) -> Void) -> ListenerRegistration? {
+        guard let uid = auth.currentUser?.uid else {
+            handler([])
+            return nil
+        }
+
+        var blockedIds: Set<String> = []
+        var blockedByIds: Set<String> = []
+        var hiddenIds: Set<String> = []
+        var hasLoadedBlocked = false
+        var hasLoadedBlockedBy = false
+        var hasLoadedHidden = communityId?.isEmpty == false ? false : true
+
+        func publish() {
+            guard hasLoadedBlocked, hasLoadedBlockedBy, hasLoadedHidden else { return }
+            var excluded = blockedIds
+            excluded.formUnion(blockedByIds)
+            excluded.formUnion(hiddenIds)
+            handler(excluded)
+        }
+
+        var registrations: [ListenerRegistration] = []
+        let blockedRegistration = users.document(uid)
+            .collection("blockedUsers")
+            .addSnapshotListener { snapshot, _ in
+                hasLoadedBlocked = true
+                blockedIds = Set(snapshot?.documents.map(\.documentID) ?? [])
+                publish()
+            }
+        registrations.append(blockedRegistration)
+
+        if let blockedByRegistration = observeBlockedByUserIds(handler: { ids in
+            hasLoadedBlockedBy = true
+            blockedByIds = ids
+            publish()
+        }) {
+            registrations.append(blockedByRegistration)
+        } else {
+            hasLoadedBlockedBy = true
+        }
+
+        if let communityId, !communityId.isEmpty {
+            let hiddenRegistration = users.document(uid)
+                .collection("contentFilters")
+                .document(communityId)
+                .collection("hiddenMembers")
+                .addSnapshotListener { snapshot, _ in
+                    hasLoadedHidden = true
+                    hiddenIds = Set(snapshot?.documents.map(\.documentID) ?? [])
+                    publish()
+                }
+            registrations.append(hiddenRegistration)
+        }
+
+        return CompositeListenerRegistration(registrations)
+    }
+
+    private func filterMembers(_ members: [Member], excluded: Set<String>) -> [Member] {
+        members.filter { member in
+            member.uid == auth.currentUser?.uid || excluded.contains(member.uid) == false
+        }
+    }
+
     private func filterMembers(_ members: [Member], communityId: String) async -> [Member] {
         let excluded = await loadExcludedUserIds(communityId: communityId)
-        return members.filter { member in
-            member.uid == auth.currentUser?.uid || excluded.contains(member.uid) == false
+        return filterMembers(members, excluded: excluded)
+    }
+
+    private func filterMessages(_ messages: [Message], excluded: Set<String>) -> [Message] {
+        messages.filter { message in
+            !message.isQuarantined && excluded.contains(message.senderUid) == false
         }
     }
 
     private func filterMessages(_ messages: [Message], communityId: String) async -> [Message] {
         let excluded = await loadExcludedUserIds(communityId: communityId)
-        return messages.filter { message in
-            !message.isQuarantined && excluded.contains(message.senderUid) == false
+        return filterMessages(messages, excluded: excluded)
+    }
+
+    private func filterTorpilles(_ torpilles: [Torpille], excluded: Set<String>) -> [Torpille] {
+        let oldestVisibleDate = Date().addingTimeInterval(-torpilleRetentionInterval)
+        return torpilles.filter { torpille in
+            let createdAt = torpille.createdAt?.dateValue() ?? .distantPast
+            return !torpille.isQuarantined
+                && excluded.contains(torpille.fromUid) == false
+                && createdAt >= oldestVisibleDate
         }
     }
 
     private func filterTorpilles(_ torpilles: [Torpille], communityId: String) async -> [Torpille] {
         let excluded = await loadExcludedUserIds(communityId: communityId)
-        return torpilles.filter { torpille in
-            !torpille.isQuarantined && excluded.contains(torpille.fromUid) == false
-        }
+        return filterTorpilles(torpilles, excluded: excluded)
     }
 
     private func filterReels(_ reels: [PublishedReel]) async -> [PublishedReel] {
         let excluded = await loadBlockedUserIds()
+        return filterReels(reels, blockedUserIds: excluded)
+    }
+
+    private func filterReels(_ reels: [PublishedReel], blockedUserIds: Set<String>) -> [PublishedReel] {
         return reels.filter { reel in
-            !reel.isQuarantined && excluded.contains(reel.authorUid) == false
+            !reel.isQuarantined && blockedUserIds.contains(reel.authorUid) == false
         }
     }
 
@@ -1009,26 +1300,31 @@ final class CommunityRepository {
         return profileCommunityIds
     }
 
-    private func resolveCommunities(for uid: String, communityIds: [String]) async -> (communities: [Community], validIds: [String]) {
+    private func resolveCommunities(for uid: String, communityIds: [String], onPartial: (([Community]) -> Void)? = nil) async -> (communities: [Community], validIds: [String]) {
         var result: [(Community, Member)] = []
         var validCommunityIds: [String] = []
 
-        for communityId in communityIds {
-            let communityRef = self.communities.document(communityId)
-            async let communitySnapshot = communityRef.getDocument()
-            async let memberSnapshot = communityRef.collection("members").document(uid).getDocument()
-
-            guard let resolvedCommunity = try? await communitySnapshot,
-                  resolvedCommunity.exists,
-                  let community = self.decodeCommunity(from: resolvedCommunity),
-                  let resolvedMember = try? await memberSnapshot,
-                  resolvedMember.exists,
-                  let member = self.decodeMember(from: resolvedMember) else {
-                continue
+        await withTaskGroup(of: (String, Community, Member)?.self) { group in
+            for communityId in communityIds {
+                group.addTask {
+                    let communityRef = self.communities.document(communityId)
+                    async let communitySnapshot = communityRef.getDocument()
+                    async let memberSnapshot = communityRef.collection("members").document(uid).getDocument()
+                    guard let resolvedCommunity = try? await communitySnapshot,
+                          resolvedCommunity.exists,
+                          let community = self.decodeCommunity(from: resolvedCommunity),
+                          let resolvedMember = try? await memberSnapshot,
+                          resolvedMember.exists,
+                          let member = self.decodeMember(from: resolvedMember) else { return nil }
+                    return (communityId, community, member)
+                }
             }
-
-            validCommunityIds.append(communityId)
-            result.append((community, member))
+            for await value in group {
+                guard let (id, community, member) = value else { continue }
+                validCommunityIds.append(id)
+                result.append((community, member))
+                onPartial?(result.map(\.0))
+            }
         }
 
         let sorted = result.sorted { lhs, rhs in
@@ -1047,7 +1343,7 @@ final class CommunityRepository {
             return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
         }.map(\.0)
 
-        return (sorted, validCommunityIds)
+        return (sorted, communityIds.filter { validCommunityIds.contains($0) })
     }
 
     private func ensureMemberDocumentExists(
@@ -1168,6 +1464,7 @@ final class CommunityRepository {
             pendingDeadlineAt: timestampValue(from: data["pendingDeadlineAt"]),
             pendingFromPseudo: stringValue(from: data["pendingFromPseudo"]),
             lastTorpilledAt: timestampValue(from: data["lastTorpilledAt"]),
+            lastTorpilleSentAt: timestampValue(from: data["lastTorpilleSentAt"]),
             lastRespondedAt: timestampValue(from: data["lastRespondedAt"]),
             overdueCount: int64Value(from: data["overdueCount"]),
             lastLatitude: doubleValue(from: data["lastLatitude"]),
@@ -1175,7 +1472,8 @@ final class CommunityRepository {
             lastLocationUpdatedAt: timestampValue(from: data["lastLocationUpdatedAt"]),
             lastSeenTorpilleAt: timestampValue(from: data["lastSeenTorpilleAt"]),
             lastSeenMessageAt: timestampValue(from: data["lastSeenMessageAt"]),
-            lastOpenedAt: timestampValue(from: data["lastOpenedAt"])
+            lastOpenedAt: timestampValue(from: data["lastOpenedAt"]),
+            lastActiveAt: timestampValue(from: data["lastActiveAt"])
         )
     }
 
@@ -1400,8 +1698,8 @@ final class CommunityRepository {
         return (transactionResult as? Bool) ?? false
     }
 
-    func inviteLink(for communityId: String) -> String {
-        "https://torpille-38783.web.app/join.html?cid=\(communityId)"
+    func inviteLink(for communityId: String, languageCode: String = "fr") -> String {
+        "https://torpille-38783.web.app/join.html?cid=\(communityId)&lang=\(languageCode)"
     }
 
     func getCommunityOrThrow(_ communityId: String) async throws -> Community {
@@ -1417,7 +1715,7 @@ final class CommunityRepository {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         try BasicContentFilter.validate(name)
         guard me.hasRequiredIdentity else {
-            throw TorpilleError.missingData("Complète ton profil avant de créer une communauté.")
+            throw TorpilleError.missingData("Complète obligatoirement ton prénom, ton nom et ton pseudo, puis accepte les règles EULA et la politique de confidentialité avant de créer une communauté.")
         }
         do {
             try await refreshCurrentAuthToken()
@@ -1472,34 +1770,28 @@ final class CommunityRepository {
         return doc.documentID
     }
 
-    func joinCommunity(communityId: String, me: UserProfile) async throws {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+    enum JoinCommunityOutcome {
+        case joined
+        case requestPending
+    }
+
+    func joinCommunity(communityId: String, me: UserProfile) async throws -> JoinCommunityOutcome {
+        guard auth.currentUser?.uid != nil else { throw TorpilleError.notAuthenticated }
         guard me.hasRequiredIdentity else {
             throw TorpilleError.missingData("Complète ton profil avant de rejoindre une communauté.")
         }
         try await refreshCurrentAuthToken()
-        let communityRef = communities.document(communityId)
-        let communitySnapshot = try await communityRef.getDocument()
-        guard communitySnapshot.exists else {
-            throw TorpilleError.missingData("Communauté introuvable")
+        let result = try await functions.httpsCallable("requestCommunityMembership").call([
+            "communityId": communityId
+        ])
+        guard let data = result.data as? [String: Any], let status = data["status"] as? String else {
+            throw TorpilleError.missingData("Réponse invalide du serveur.")
         }
-        let bannedSnapshot = try await communityRef.collection("banned").document(uid).getDocument()
-        if bannedSnapshot.exists {
-            throw TorpilleError.missingData("Tu ne peux plus rejoindre cette communauté.")
+        if status == "pending" || status == "already-pending" {
+            return .requestPending
         }
-
-        let payload = memberPayload(
-            uid: uid,
-            pseudo: me.pseudo,
-            photoUrl: me.photoUrl,
-            profileIcon: me.profileIcon,
-            xpInCommunity: 0
-        )
-        try await communityRef.collection("members").document(uid).setData(payload, merge: true)
-        do {
-            try await appendCommunityIdToProfile(communityId, for: uid)
-        } catch {
-            print("⚠️ CommunityRepository.joinCommunity appendCommunityIdToProfile failure:", debugDescribe(error))
+        guard status == "joined" || status == "already-member" else {
+            throw TorpilleError.missingData("La demande n'a pas pu être traitée.")
         }
         do {
             try await markCommunityOpened(communityId)
@@ -1514,6 +1806,24 @@ final class CommunityRepository {
                 OperationDiagnostics.message(for: .recalculateTotalXP, error: error)
             )
         }
+        return .joined
+    }
+
+    func observePendingJoinRequests(communityId: String, handler: @escaping ([CommunityJoinRequest]) -> Void) -> ListenerRegistration {
+        db.collection("communityJoinRequests")
+            .whereField("communityId", isEqualTo: communityId)
+            .whereField("status", isEqualTo: CommunityJoinRequestStatus.pending.rawValue)
+            .addSnapshotListener { snapshot, _ in
+                let values = snapshot?.documents.compactMap { try? $0.data(as: CommunityJoinRequest.self) } ?? []
+                handler(values.sorted { ($0.createdAt?.dateValue() ?? .distantPast) < ($1.createdAt?.dateValue() ?? .distantPast) })
+            }
+    }
+
+    func resolveJoinRequest(_ request: CommunityJoinRequest, accept: Bool) async throws {
+        _ = try await functions.httpsCallable("resolveCommunityJoinRequest").call([
+            "requestId": request.id,
+            "decision": accept ? "accepted" : "rejected"
+        ])
     }
 
     func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64) async throws {
@@ -1525,6 +1835,17 @@ final class CommunityRepository {
         try await communities.document(communityId).updateData([
             "isPublic": isPublic,
             "responseTimeSeconds": responseTimeSeconds
+        ])
+    }
+
+    func deleteCommunityPermanently(communityId: String) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let community = try await getCommunityOrThrow(communityId)
+        guard community.adminUid == uid else {
+            throw TorpilleError.missingData("Seul l'administrateur peut supprimer la communauté.")
+        }
+        _ = try await functions.httpsCallable("deleteCommunity").call([
+            "communityId": communityId
         ])
     }
 
@@ -1582,15 +1903,18 @@ final class CommunityRepository {
         }
     }
 
-    func observeCommunitiesForMe(handler: @escaping ([Community]) -> Void) -> ListenerRegistration? {
+    func observeCommunitiesForMe(onPartial: (([Community]) -> Void)? = nil, handler: @escaping ([Community]) -> Void) -> ListenerRegistration? {
         guard let uid = auth.currentUser?.uid else {
             handler([])
             return nil
         }
 
+        var generation = 0
         return db.collectionGroup("members")
             .whereField("uid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snapshot, _ in
+            generation += 1
+            let currentGeneration = generation
             guard let self else { return }
             Task {
                 let storedIds = (try? await self.loadCanonicalCommunityIds(for: uid)) ?? []
@@ -1602,6 +1926,13 @@ final class CommunityRepository {
                     secondary: membershipIds
                 )
 
+                let resolved = await self.resolveCommunities(for: uid, communityIds: mergedIds) { values in
+                    guard currentGeneration == generation else { return }
+                    onPartial?(values)
+                }
+                guard currentGeneration == generation else { return }
+                handler(resolved.communities)
+
                 if mergedIds != storedIds {
                     do {
                         try await self.setProfileCommunityIds(mergedIds, for: uid)
@@ -1610,7 +1941,6 @@ final class CommunityRepository {
                     }
                 }
 
-                let resolved = await self.resolveCommunities(for: uid, communityIds: mergedIds)
                 if resolved.validIds != mergedIds {
                     do {
                         let repairedIds = resolved.validIds.isEmpty ? membershipIds : resolved.validIds
@@ -1622,9 +1952,8 @@ final class CommunityRepository {
 
                 if resolved.communities.isEmpty && !mergedIds.isEmpty && !membershipIds.isEmpty {
                     let fallbackResolved = await self.resolveCommunities(for: uid, communityIds: membershipIds)
+                    guard currentGeneration == generation else { return }
                     handler(fallbackResolved.communities)
-                } else {
-                    handler(resolved.communities)
                 }
             }
         }
@@ -1632,16 +1961,18 @@ final class CommunityRepository {
 
     func markCommunityOpened(_ communityId: String) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        let now = Timestamp(date: Date())
         try await appendCommunityIdToProfile(communityId, for: uid)
         try await communities.document(communityId)
             .collection("members")
             .document(uid)
             .setData([
-                "lastOpenedAt": Timestamp(date: Date())
+                "lastOpenedAt": now,
+                "lastActiveAt": now
             ], merge: true)
     }
 
-    func markMeOpened(in communityIds: [String]) async throws {
+    func markMeActive(in communityIds: [String]) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let now = Timestamp(date: Date())
         for communityId in communityIds where !communityId.isEmpty {
@@ -1649,7 +1980,7 @@ final class CommunityRepository {
                 .collection("members")
                 .document(uid)
                 .setData([
-                    "lastOpenedAt": now
+                    "lastActiveAt": now
                 ], merge: true)
         }
     }
@@ -1666,7 +1997,28 @@ final class CommunityRepository {
     }
 
     func observeMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
-        communities.document(communityId)
+        var currentMembers: [Member] = []
+        var currentExcludedUserIds: Set<String> = []
+        var hasLoadedPrivacyFilters = false
+        var publishGeneration = 0
+
+        func publish(_ members: [Member], excludedUserIds: Set<String>) {
+            // Never expose an unfiltered membership snapshot, even briefly,
+            // while blocked/blockedBy filters are still loading.
+            guard hasLoadedPrivacyFilters else {
+                handler([])
+                return
+            }
+            publishGeneration += 1
+            let generation = publishGeneration
+            Task {
+                let enriched = await self.enrichCommunityMembers(members, communityId: communityId)
+                guard generation == publishGeneration else { return }
+                handler(self.filterMembers(enriched, excluded: excludedUserIds))
+            }
+        }
+
+        let membersRegistration = communities.document(communityId)
             .collection("members")
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let self else {
@@ -1674,23 +2026,163 @@ final class CommunityRepository {
                     return
                 }
 
-                let values = (snapshot?.documents.compactMap { self.decodeMember(from: $0) } ?? [])
-                    .sorted { lhs, rhs in
-                        if lhs.xpInCommunity != rhs.xpInCommunity {
-                            return lhs.xpInCommunity > rhs.xpInCommunity
-                        }
-
-                        let leftName = lhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let rightName = rhs.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
-                    }
-
-                Task {
-                    let enriched = await self.enrichMembersWithUserProfiles(values)
-                    let filtered = await self.filterMembers(enriched, communityId: communityId)
-                    handler(filtered)
-                }
+                let values = snapshot?.documents.compactMap { self.decodeMember(from: $0) } ?? []
+                currentMembers = values
+                publish(values, excludedUserIds: currentExcludedUserIds)
             }
+
+        // Community-level hiding applies to content only. Keep hidden members
+        // in the membership list so the user can find and unhide them later.
+        // Account-level blocked/blockedBy relationships remain excluded.
+        let excludedRegistration = observeExcludedUserIds(communityId: nil) { excludedUserIds in
+            hasLoadedPrivacyFilters = true
+            currentExcludedUserIds = excludedUserIds
+            publish(currentMembers, excludedUserIds: excludedUserIds)
+        }
+
+        return CompositeListenerRegistration([membersRegistration] + [excludedRegistration].compactMap { $0 })
+    }
+
+    /// The torpille recipient picker must contain every registered community
+    /// member. In particular, it must not inherit the discussion visibility
+    /// filters (hidden/blocked members).
+    func observeTorpilleTargetMembers(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
+        var currentMembers: [Member] = []
+        var blockedIds: Set<String> = []
+        var blockedByIds: Set<String> = []
+
+        func publish() {
+            Task {
+                let enriched = await self.enrichCommunityMembers(currentMembers, communityId: communityId)
+                handler(enriched.filter {
+                    blockedIds.contains($0.uid) == false && blockedByIds.contains($0.uid) == false
+                })
+            }
+        }
+
+        let membersRegistration = communities.document(communityId)
+            .collection("members")
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self else {
+                    handler([])
+                    return
+                }
+
+                currentMembers = snapshot?.documents.compactMap { self.decodeMember(from: $0) } ?? []
+                publish()
+            }
+
+        let blockedRegistration: ListenerRegistration?
+        if let uid = auth.currentUser?.uid {
+            blockedRegistration = users.document(uid)
+                .collection("blockedUsers")
+                .addSnapshotListener { snapshot, _ in
+                    blockedIds = Set(snapshot?.documents.map(\.documentID) ?? [])
+                    publish()
+                }
+        } else {
+            blockedRegistration = nil
+        }
+
+        let blockedByRegistration = observeBlockedByUserIds { ids in
+            blockedByIds = ids
+            publish()
+        }
+
+        return CompositeListenerRegistration(
+            [membersRegistration] + [blockedRegistration, blockedByRegistration].compactMap { $0 }
+        )
+    }
+
+    func observeDiscussionParticipants(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
+        var currentMembers: [Member] = []
+        var currentExcludedUserIds: Set<String> = []
+        var hasLoadedBlockingFilters = false
+
+        func publish(_ members: [Member], excludedUserIds: Set<String>) {
+            guard hasLoadedBlockingFilters else {
+                handler([])
+                return
+            }
+            Task {
+                let enriched = await self.enrichRegisteredMembersWithUserProfiles(members)
+                let filtered = self.filterMembers(self.sortMembersForDisplay(enriched), excluded: excludedUserIds)
+                handler(filtered)
+            }
+        }
+
+        let membersRegistration = communities.document(communityId)
+            .collection("members")
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self else {
+                    handler([])
+                    return
+                }
+
+                let values = snapshot?.documents.compactMap { self.decodeMember(from: $0) } ?? []
+                currentMembers = values
+                publish(values, excludedUserIds: currentExcludedUserIds)
+            }
+
+        // A community-specific mask hides messages and torpilles, not the
+        // member entry itself. Only full blocking relationships remove a user
+        // from this list; otherwise the "show content again" action would be
+        // unreachable.
+        let excludedRegistration = observeExcludedUserIds(communityId: nil) { excludedUserIds in
+            hasLoadedBlockingFilters = true
+            currentExcludedUserIds = excludedUserIds
+            publish(currentMembers, excludedUserIds: excludedUserIds)
+        }
+
+        return CompositeListenerRegistration([membersRegistration] + [excludedRegistration].compactMap { $0 })
+    }
+
+    private func enrichCommunityMembers(_ members: [Member], communityId: String) async -> [Member] {
+        let profileBackedMembers = await loadProfileBackedMembers(communityId: communityId)
+        var membersByUID = Dictionary(uniqueKeysWithValues: profileBackedMembers.map { ($0.uid, $0) })
+
+        for member in await enrichMembersWithUserProfiles(members) {
+            guard !member.uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            membersByUID[member.uid] = member
+        }
+
+        return sortMembersForDisplay(Array(membersByUID.values))
+    }
+
+    private func loadProfileBackedMembers(communityId: String) async -> [Member] {
+        let cleanCommunityId = communityId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCommunityId.isEmpty else { return [] }
+
+        do {
+            let snapshot = try await users
+                .whereField("communityIds", arrayContains: cleanCommunityId)
+                .getDocuments()
+
+            return snapshot.documents.compactMap { document in
+                let profile = try? document.data(as: UserProfile.self)
+                guard let profile else { return nil }
+                let uid = profile.uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? document.documentID : profile.uid
+                let pseudo = profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !pseudo.isEmpty else {
+                    return nil
+                }
+
+                return Member(
+                    documentId: document.documentID,
+                    uid: uid,
+                    pseudo: pseudo,
+                    photoUrl: profile.photoUrl,
+                    profileIcon: profile.profileIcon,
+                    xpInCommunity: profile.communityXP[cleanCommunityId] ?? 0,
+                    lastLatitude: profile.lastLatitude,
+                    lastLongitude: profile.lastLongitude,
+                    lastLocationUpdatedAt: profile.lastLocationUpdatedAt
+                )
+            }
+        } catch {
+            debugLog("CommunityRepository.loadProfileBackedMembers failed", error)
+            return []
+        }
     }
 
     private func enrichMembersWithUserProfiles(_ members: [Member]) async -> [Member] {
@@ -1717,9 +2209,12 @@ final class CommunityRepository {
 
         let profilesByUID = Dictionary(uniqueKeysWithValues: profilePairs)
 
-        return members.compactMap { member in
+        return members.map { member in
             guard let profile = profilesByUID[member.uid] ?? nil else {
-                return nil
+                // Keep the membership visible even if its user profile cannot
+                // be loaded temporarily. The member document may already hold
+                // the pseudo and remains a valid torpille target.
+                return member
             }
 
             var updatedMember = member
@@ -1728,7 +2223,84 @@ final class CommunityRepository {
             if !profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 updatedMember.pseudo = profile.pseudo
             }
+            if let profileLatitude = profile.lastLatitude,
+               let profileLongitude = profile.lastLongitude {
+                let shouldUseProfileLocation: Bool
+                if let memberUpdatedAt = member.lastLocationUpdatedAt,
+                   let profileUpdatedAt = profile.lastLocationUpdatedAt {
+                    shouldUseProfileLocation = profileUpdatedAt.dateValue() >= memberUpdatedAt.dateValue()
+                } else {
+                    shouldUseProfileLocation = member.lastLatitude == nil || member.lastLongitude == nil
+                }
+
+                if shouldUseProfileLocation {
+                    updatedMember.lastLatitude = profileLatitude
+                    updatedMember.lastLongitude = profileLongitude
+                    updatedMember.lastLocationUpdatedAt = profile.lastLocationUpdatedAt ?? member.lastLocationUpdatedAt
+                }
+            }
             return updatedMember
+        }
+    }
+
+    private func enrichRegisteredMembersWithUserProfiles(_ members: [Member]) async -> [Member] {
+        guard !members.isEmpty else { return members }
+
+        let profilePairs = await withTaskGroup(of: (String, UserProfile?).self) { group in
+            for uid in Set(members.map(\.uid).filter { !$0.isEmpty }) {
+                group.addTask { [users = self.users] in
+                    let snapshot = try? await users.document(uid).getDocument()
+                    let profile = snapshot.flatMap { document -> UserProfile? in
+                        guard document.exists else { return nil }
+                        return try? document.data(as: UserProfile.self)
+                    }
+                    return (uid, profile)
+                }
+            }
+
+            var collected: [(String, UserProfile?)] = []
+            for await item in group {
+                collected.append(item)
+            }
+            return collected
+        }
+
+        let profilesByUID = Dictionary(uniqueKeysWithValues: profilePairs)
+
+        return members.map { member in
+            guard let profile = profilesByUID[member.uid] ?? nil else {
+                return member
+            }
+
+            return mergeRegisteredMember(member, with: profile)
+        }
+    }
+
+    private func mergeRegisteredMember(_ member: Member, with profile: UserProfile) -> Member {
+        var updatedMember = member
+        updatedMember.photoUrl = profile.photoUrl ?? member.photoUrl
+        updatedMember.profileIcon = profile.profileIcon ?? member.profileIcon
+        if !profile.pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            updatedMember.pseudo = profile.pseudo
+        }
+        if let profileLatitude = profile.lastLatitude,
+           let profileLongitude = profile.lastLongitude {
+            updatedMember.lastLatitude = profileLatitude
+            updatedMember.lastLongitude = profileLongitude
+            updatedMember.lastLocationUpdatedAt = profile.lastLocationUpdatedAt ?? member.lastLocationUpdatedAt
+        }
+        return updatedMember
+    }
+
+    private func sortMembersForDisplay(_ members: [Member]) -> [Member] {
+        members.sorted { lhs, rhs in
+            if lhs.xpInCommunity != rhs.xpInCommunity {
+                return lhs.xpInCommunity > rhs.xpInCommunity
+            }
+
+            let leftName = lhs.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rightName = rhs.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
         }
     }
 
@@ -1768,44 +2340,80 @@ final class CommunityRepository {
     }
 
     func observeMessages(_ communityId: String, handler: @escaping ([Message]) -> Void) -> ListenerRegistration {
-        communities.document(communityId)
+        var currentMessages: [Message] = []
+        var currentExcludedUserIds: Set<String> = []
+
+        func publish(_ messages: [Message], excludedUserIds: Set<String>) {
+            let visible = messages.filter { self.isMessageVisibleInDiscussion($0) }
+            handler(self.filterMessages(visible, excluded: excludedUserIds))
+        }
+
+        let messagesRegistration = communities.document(communityId)
             .collection("messages")
             .order(by: "createdAt", descending: false)
             .limit(toLast: 100)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { self.decodeMessage(from: $0) } ?? []
+                currentMessages = values
                 let expired = values.filter { self.isExpiredUnsavedMessage($0) }
                 if !expired.isEmpty {
                     Task { try? await self.deleteExpiredMessages(communityId: communityId, messages: expired) }
                 }
-                Task {
-                    let visible = values.filter { self.isMessageVisibleInDiscussion($0) }
-                    let filtered = await self.filterMessages(visible, communityId: communityId)
-                    handler(filtered)
-                }
+                publish(values, excludedUserIds: currentExcludedUserIds)
             }
+
+        let excludedRegistration = observeExcludedUserIds(communityId: communityId) { excludedUserIds in
+            currentExcludedUserIds = excludedUserIds
+            publish(currentMessages, excludedUserIds: excludedUserIds)
+        }
+
+        return CompositeListenerRegistration([messagesRegistration] + [excludedRegistration].compactMap { $0 })
     }
 
     func observeSavedMessages(_ communityId: String, handler: @escaping ([Message]) -> Void) -> ListenerRegistration {
-        communities.document(communityId)
+        var currentMessages: [Message] = []
+        var currentExcludedUserIds: Set<String> = []
+
+        func publish(_ messages: [Message], excludedUserIds: Set<String>) {
+            handler(self.filterMessages(messages, excluded: excludedUserIds))
+        }
+
+        let messagesRegistration = communities.document(communityId)
             .collection("savedMessages")
             .order(by: "savedAt", descending: true)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { self.decodeMessage(from: $0) } ?? []
-                Task {
-                    let filtered = await self.filterMessages(values, communityId: communityId)
-                    handler(filtered)
-                }
+                currentMessages = values
+                publish(values, excludedUserIds: currentExcludedUserIds)
             }
+
+        let excludedRegistration = observeExcludedUserIds(communityId: communityId) { excludedUserIds in
+            currentExcludedUserIds = excludedUserIds
+            publish(currentMessages, excludedUserIds: excludedUserIds)
+        }
+
+        return CompositeListenerRegistration([messagesRegistration] + [excludedRegistration].compactMap { $0 })
+    }
+
+    private func isTorpilleMessage(_ message: Message) -> Bool {
+        message.torpilleId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func isExpiredMessage(_ message: Message, now: Date = Date()) -> Bool {
+        guard let createdAt = message.createdAt?.dateValue() else { return false }
+        let retentionInterval = isTorpilleMessage(message) ? torpilleRetentionInterval : messageRetentionInterval
+        return now.timeIntervalSince(createdAt) >= retentionInterval
     }
 
     private func isExpiredUnsavedMessage(_ message: Message, now: Date = Date()) -> Bool {
-        guard !message.isSaved, let createdAt = message.createdAt?.dateValue() else { return false }
-        return now.timeIntervalSince(createdAt) >= messageRetentionInterval
+        !message.isSaved && isExpiredMessage(message, now: now)
     }
 
     private func isMessageVisibleInDiscussion(_ message: Message, now: Date = Date()) -> Bool {
-        message.isSaved || !isExpiredUnsavedMessage(message, now: now)
+        if isTorpilleMessage(message), isExpiredMessage(message, now: now) {
+            return false
+        }
+        return message.isSaved || !isExpiredUnsavedMessage(message, now: now)
     }
 
     private func deleteExpiredMessages(communityId: String, messages: [Message]) async throws {
@@ -1857,7 +2465,7 @@ final class CommunityRepository {
             "senderUid": uid,
             "senderPseudo": senderPseudo,
             "text": text,
-            "moderationStatus": "visible",
+            "moderationStatus": "pending",
             "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
@@ -1883,7 +2491,7 @@ final class CommunityRepository {
             "imageUrl": uploaded.downloadURL,
             "imageBucket": uploaded.bucket,
             "imagePath": uploaded.storagePath,
-            "moderationStatus": "visible",
+            "moderationStatus": "pending",
             "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
@@ -1904,7 +2512,7 @@ final class CommunityRepository {
             "videoBucket": uploaded.bucket,
             "videoPath": uploaded.storagePath,
             "videoUrl": uploaded.downloadURL,
-            "moderationStatus": "visible",
+            "moderationStatus": "pending",
             "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
@@ -1913,17 +2521,29 @@ final class CommunityRepository {
     }
 
     func observeRecentTorpilles(_ communityId: String, handler: @escaping ([Torpille]) -> Void) -> ListenerRegistration {
-        communities.document(communityId)
+        var currentTorpilles: [Torpille] = []
+        var currentExcludedUserIds: Set<String> = []
+
+        func publish(_ torpilles: [Torpille], excludedUserIds: Set<String>) {
+            handler(self.filterTorpilles(torpilles, excluded: excludedUserIds))
+        }
+
+        let torpillesRegistration = communities.document(communityId)
             .collection("torpilles")
             .order(by: "createdAt", descending: true)
             .limit(to: 40)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { self.decodeTorpille(from: $0) } ?? []
-                Task {
-                    let filtered = await self.filterTorpilles(values, communityId: communityId)
-                    handler(filtered)
-                }
+                currentTorpilles = values
+                publish(values, excludedUserIds: currentExcludedUserIds)
             }
+
+        let excludedRegistration = observeExcludedUserIds(communityId: communityId) { excludedUserIds in
+            currentExcludedUserIds = excludedUserIds
+            publish(currentTorpilles, excludedUserIds: excludedUserIds)
+        }
+
+        return CompositeListenerRegistration([torpillesRegistration] + [excludedRegistration].compactMap { $0 })
     }
 
     func markTorpillesSeen(communityId: String, upTo timestamp: Timestamp? = nil) async throws {
@@ -1948,7 +2568,7 @@ final class CommunityRepository {
         print("🔐 auth email =", auth.currentUser?.email ?? "nil")
 
         do {
-            let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: true)
+            let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: false)
             print("✅ ID token refresh ok")
             print("🔐 token =", token?.token.prefix(20) ?? "nil")
         } catch {
@@ -1991,8 +2611,9 @@ final class CommunityRepository {
             "senderPseudo": senderPseudo,
             "audioBucket": uploaded.bucket,
             "audioPath": uploaded.storagePath,
+            "audioUrl": uploaded.downloadURL,
             "audioDurationSeconds": uploaded.durationSeconds,
-            "moderationStatus": "visible",
+            "moderationStatus": "pending",
             "reportCount": 0,
             "createdAt": Timestamp(date: Date())
         ]
@@ -2014,7 +2635,17 @@ final class CommunityRepository {
     }
 
     func observePublishedReels(limit: Int = 40, handler: @escaping ([PublishedReel]) -> Void) -> ListenerRegistration {
-        reels
+        var currentReels: [PublishedReel] = []
+        var currentBlockedUserIds: Set<String> = []
+
+        func publish(_ reels: [PublishedReel], blockedUserIds: Set<String>) {
+            Task {
+                let filtered = self.filterReels(reels, blockedUserIds: blockedUserIds)
+                handler(await self.enrichReelsWithAuthorProfiles(filtered))
+            }
+        }
+
+        let reelsRegistration = reels
             .order(by: "publishedAt", descending: true)
             .limit(to: limit)
             .addSnapshotListener { snapshot, _ in
@@ -2023,15 +2654,31 @@ final class CommunityRepository {
                     value?.id = doc.documentID
                     return value
                 } ?? []
-                Task {
-                    let filtered = await self.filterReels(values)
-                    handler(await self.enrichReelsWithAuthorProfiles(filtered))
-                }
+                currentReels = values
+                publish(values, blockedUserIds: currentBlockedUserIds)
             }
+
+        let blockedRegistration = observeExcludedUserIds(communityId: nil) { blockedUserIds in
+            currentBlockedUserIds = blockedUserIds
+            publish(currentReels, blockedUserIds: blockedUserIds)
+        }
+
+        return CompositeListenerRegistration([reelsRegistration] + [blockedRegistration].compactMap { $0 })
     }
 
     func observePublishedReelsForCommunity(_ communityId: String, handler: @escaping ([PublishedReel]) -> Void) -> ListenerRegistration {
-        reels
+        var currentReels: [PublishedReel] = []
+        var currentBlockedUserIds: Set<String> = []
+
+        func publish(_ reels: [PublishedReel], blockedUserIds: Set<String>) {
+            Task {
+                let filtered = self.filterReels(reels, blockedUserIds: blockedUserIds)
+                let enriched = await self.enrichReelsWithAuthorProfiles(filtered)
+                handler(enriched.sorted { ($0.publishedAt?.dateValue() ?? .distantPast) > ($1.publishedAt?.dateValue() ?? .distantPast) })
+            }
+        }
+
+        let reelsRegistration = reels
             .whereField("communityId", isEqualTo: communityId)
             .addSnapshotListener { snapshot, _ in
                 let values = snapshot?.documents.compactMap { doc -> PublishedReel? in
@@ -2039,12 +2686,16 @@ final class CommunityRepository {
                     value?.id = doc.documentID
                     return value
                 } ?? []
-                Task {
-                    let filtered = await self.filterReels(values)
-                    let enriched = await self.enrichReelsWithAuthorProfiles(filtered)
-                    handler(enriched.sorted { ($0.publishedAt?.dateValue() ?? .distantPast) > ($1.publishedAt?.dateValue() ?? .distantPast) })
-                }
+                currentReels = values
+                publish(values, blockedUserIds: currentBlockedUserIds)
             }
+
+        let blockedRegistration = observeExcludedUserIds(communityId: nil) { blockedUserIds in
+            currentBlockedUserIds = blockedUserIds
+            publish(currentReels, blockedUserIds: blockedUserIds)
+        }
+
+        return CompositeListenerRegistration([reelsRegistration] + [blockedRegistration].compactMap { $0 })
     }
 
     func publicUserProfile(uid: String) async throws -> UserProfile {
@@ -2121,7 +2772,7 @@ final class CommunityRepository {
             taggedPseudo: message.taggedPseudo,
             createdAt: message.createdAt,
             publishedAt: publishedAt,
-            moderationStatus: "visible",
+            moderationStatus: "pending",
             reportCount: 0
         ), forDocument: reelRef)
         try await batch.commit()
@@ -2212,7 +2863,7 @@ final class CommunityRepository {
         print("🔐 currentUser.email =", auth.currentUser?.email ?? "nil")
 
         do {
-            if let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: true) {
+            if let token = try await auth.currentUser?.getIDTokenResult(forcingRefresh: false) {
                 print("✅ ID token refresh ok")
                 print("🔐 token authTime =", token.authDate)
                 print("🔐 token expiration =", token.expirationDate)
@@ -2230,7 +2881,7 @@ final class CommunityRepository {
         }
 
         print("📍 1. getCommunityOrThrow")
-        let community = try await getCommunityOrThrow(communityId)
+        _ = try await getCommunityOrThrow(communityId)
 
         let fileExtension = localFileURL.pathExtension.isEmpty ? "mov" : localFileURL.pathExtension.lowercased()
         let filename = "\(Int(Date().timeIntervalSince1970 * 1000))_\(uid).\(fileExtension)"
@@ -2259,111 +2910,20 @@ final class CommunityRepository {
             throw error
         }
 
-        let createdAt = Timestamp(date: Date())
-        let deadlineAt = Timestamp(date: Date().addingTimeInterval(TimeInterval(community.responseTimeSeconds)))
-        let torpDoc = communities.document(communityId).collection("torpilles").document()
-        let msgDoc = communities.document(communityId).collection("messages").document()
-
-        let batch = db.batch()
-
-        let cleanTaggedPseudo = taggedPseudo.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedTaggedUid = taggedUid?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasIdentifiedTarget = !(resolvedTaggedUid ?? "").isEmpty
-
-        try await ensureMemberDocumentExists(
-            communityId: communityId,
-            uid: uid,
-            fallbackPseudo: senderPseudo
-        )
-        if hasIdentifiedTarget, let resolvedTaggedUid {
-            try await ensureMemberDocumentExists(
-                communityId: communityId,
-                uid: resolvedTaggedUid,
-                fallbackPseudo: cleanTaggedPseudo
-            )
-        }
-
-        let torpillePayload: [String: Any] = [
-            "id": torpDoc.documentID,
-            "fromUid": uid,
-            "fromPseudo": senderPseudo,
-            "toUid": resolvedTaggedUid ?? "",
+        // Metadata creation is server-side and atomic: the torpille cannot be
+        // created without its corresponding discussion message.
+        _ = try await functions.httpsCallable("createVideoTorpille").call([
             "communityId": communityId,
+            "senderPseudo": senderPseudo,
+            "taggedUid": taggedUid ?? "",
+            "taggedPseudo": taggedPseudo,
             "videoBucket": uploaded.bucket,
             "videoPath": uploaded.storagePath,
-            "taggedPseudo": cleanTaggedPseudo,
+            "videoUrl": uploaded.downloadURL,
             "tagX": tagX,
-            "tagY": tagY,
-            "createdAt": createdAt,
-            "deadlineAt": deadlineAt,
-            "responded": false,
-            "isPublished": false,
-            "moderationStatus": "visible",
-            "reportCount": 0
-        ]
-        batch.setData(torpillePayload, forDocument: torpDoc)
-
-        try batch.setData(from: Message(
-            id: msgDoc.documentID,
-            type: "video",
-            senderUid: uid,
-            senderPseudo: senderPseudo,
-            text: nil,
-            videoUrl: uploaded.downloadURL,
-            videoBucket: uploaded.bucket,
-            videoPath: uploaded.storagePath,
-            audioUrl: nil,
-            audioBucket: nil,
-            audioPath: nil,
-            audioDurationSeconds: nil,
-            imageUrl: nil,
-            imageBucket: nil,
-            imagePath: nil,
-            taggedUid: hasIdentifiedTarget ? resolvedTaggedUid : nil,
-            taggedPseudo: cleanTaggedPseudo,
-            tagX: tagX,
-            tagY: tagY,
-            torpilleId: torpDoc.documentID,
-            createdAt: createdAt,
-            savedAt: nil,
-            savedByUid: nil,
-            savedByPseudo: nil,
-            moderationStatus: "visible",
-            reportCount: 0
-        ), forDocument: msgDoc)
-
-        if hasIdentifiedTarget, let resolvedTaggedUid {
-            batch.updateData([
-                "pendingTorpilleId": torpDoc.documentID,
-                "pendingDeadlineAt": deadlineAt,
-                "pendingFromPseudo": senderPseudo,
-                "lastTorpilledAt": createdAt
-            ], forDocument: communities.document(communityId).collection("members").document(resolvedTaggedUid))
-        }
-
-        batch.updateData([
-            "uid": uid,
-            "pseudo": senderPseudo,
-            "xpInCommunity": FieldValue.increment(Int64(20))
-        ], forDocument: communities.document(communityId).collection("members").document(uid))
-
-        print("📍 3. batch.commit")
-        do {
-            try await batch.commit()
-            print("✅ batch.commit ok")
-            do {
-                try await recalculateXPForCurrentUser()
-            } catch {
-                print("⚠️ CommunityRepository.sendVideoTorpille recalculateXPForCurrentUser failure:", debugDescribe(error))
-            }
-        } catch {
-            let nsError = error as NSError
-            print("🔥 batch.commit failed")
-            print("domain =", nsError.domain)
-            print("code =", nsError.code)
-            print("userInfo =", nsError.userInfo)
-            throw error
-        }
+            "tagY": tagY
+        ])
+        try? await recalculateXPForCurrentUser()
 
     }
 
@@ -2440,23 +3000,156 @@ final class CommunityRepository {
 
     }
 
-    func updateMyLocation(in communityIds: [String], latitude: Double, longitude: Double) async throws {
+    func updateMyLocation(in communityIds: [String], latitude: Double, longitude: Double) async throws -> Bool {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         let now = Timestamp(date: Date())
+        let userReference = users.document(uid)
+        let didPublish = try await db.runTransaction { transaction, errorPointer in
+            do {
+                let snapshot = try transaction.getDocument(userReference)
+                if snapshot.data()?["isGhostMode"] as? Bool == true {
+                    return false
+                }
+                transaction.setData([
+                    "uid": uid,
+                    "lastLatitude": latitude,
+                    "lastLongitude": longitude,
+                    "lastLocationUpdatedAt": now,
+                    "updatedAt": now
+                ], forDocument: userReference, merge: true)
+                return true
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return false
+            }
+        } as? Bool ?? false
+
+        guard didPublish else { return false }
+
         for communityId in communityIds where !communityId.isEmpty {
-            try await communities.document(communityId)
+            let memberReference = communities.document(communityId)
                 .collection("members")
                 .document(uid)
-                .setData([
+            do {
+                try await memberReference.updateData([
                     "lastLatitude": latitude,
                     "lastLongitude": longitude,
                     "lastLocationUpdatedAt": now
-                ], merge: true)
+                ])
+            } catch {
+                // The profile remains the source of truth. Map reads enrich member
+                // documents from /users/{uid}, so one stale membership must not
+                // prevent location from working everywhere else.
+                debugLog("CommunityRepository.updateMyLocation member sync failed for \(communityId)", error)
+            }
+        }
+        return true
+    }
+
+    func isGhostModeEnabled() async throws -> Bool {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        return try await users.document(uid).getDocument().data()?["isGhostMode"] as? Bool ?? false
+    }
+
+    func setGhostMode(_ enabled: Bool, in communityIds: [String]) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        var profileUpdate: [String: Any] = [
+            "isGhostMode": enabled,
+            "updatedAt": Timestamp(date: Date())
+        ]
+        if enabled {
+            profileUpdate["lastLatitude"] = FieldValue.delete()
+            profileUpdate["lastLongitude"] = FieldValue.delete()
+            profileUpdate["lastLocationUpdatedAt"] = FieldValue.delete()
+        }
+        try await users.document(uid).setData(profileUpdate, merge: true)
+
+        guard enabled else { return }
+        for communityId in communityIds where !communityId.isEmpty {
+            do {
+                try await communities.document(communityId).collection("members").document(uid).updateData([
+                    "lastLatitude": FieldValue.delete(),
+                    "lastLongitude": FieldValue.delete(),
+                    "lastLocationUpdatedAt": FieldValue.delete()
+                ])
+            } catch {
+                debugLog("CommunityRepository.setGhostMode member sync failed for \(communityId)", error)
+            }
         }
     }
 
     func observeMembersForMap(_ communityId: String, handler: @escaping ([Member]) -> Void) -> ListenerRegistration {
-        observeMembers(communityId, handler: handler)
+        var publishGeneration = 0
+        return observeMembers(communityId) { [weak self] members in
+            guard let self else {
+                handler(members)
+                return
+            }
+            publishGeneration += 1
+            let generation = publishGeneration
+            Task {
+                let enriched = await self.enrichMembersWithUserLocations(members)
+                guard generation == publishGeneration else { return }
+                handler(enriched)
+            }
+        }
+    }
+
+    private func enrichMembersWithUserLocations(_ members: [Member]) async -> [Member] {
+        await withTaskGroup(of: Member.self, returning: [Member].self) { group in
+            for member in members {
+                group.addTask {
+                    await self.enrichMemberWithUserLocation(member)
+                }
+            }
+
+            var enriched: [Member] = []
+            for await member in group {
+                enriched.append(member)
+            }
+            return enriched.sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    private func enrichMemberWithUserLocation(_ member: Member) async -> Member {
+        guard !member.uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return member
+        }
+
+        do {
+            let snapshot = try await users.document(member.uid).getDocument()
+            let data = snapshot.data() ?? [:]
+            if data["isGhostMode"] as? Bool == true {
+                var hiddenMember = member
+                hiddenMember.lastLatitude = nil
+                hiddenMember.lastLongitude = nil
+                hiddenMember.lastLocationUpdatedAt = nil
+                return hiddenMember
+            }
+            guard let profileLatitude = doubleValue(from: data["lastLatitude"]),
+                  let profileLongitude = doubleValue(from: data["lastLongitude"]) else {
+                return member
+            }
+
+            let profileUpdatedAt = timestampValue(from: data["lastLocationUpdatedAt"])
+            if member.lastLatitude != nil,
+               member.lastLongitude != nil,
+               let memberUpdatedAt = member.lastLocationUpdatedAt,
+               let profileUpdatedAt,
+               memberUpdatedAt.dateValue() >= profileUpdatedAt.dateValue() {
+                return member
+            }
+
+            var enriched = member
+            enriched.lastLatitude = profileLatitude
+            enriched.lastLongitude = profileLongitude
+            enriched.lastLocationUpdatedAt = profileUpdatedAt ?? member.lastLocationUpdatedAt
+            return enriched
+        } catch {
+            return member
+        }
     }
 
     func hideMemberContent(communityId: String, member: Member) async throws {
@@ -2513,10 +3206,13 @@ final class CommunityRepository {
             payload["profileIcon"] = profileIcon
         }
 
-        try await users.document(uid)
+        let batch = db.batch()
+        batch.setData(payload, forDocument: users.document(uid)
             .collection("blockedUsers")
-            .document(member.uid)
-            .setData(payload, merge: true)
+            .document(member.uid), merge: true)
+        batch.deleteDocument(users.document(uid).collection("friends").document(member.uid))
+        batch.deleteDocument(users.document(member.uid).collection("friends").document(uid))
+        try await batch.commit()
     }
 
     func unblockUser(_ blockedUid: String) async throws {
@@ -2565,13 +3261,16 @@ final class CommunityRepository {
             throw TorpilleError.missingData("Contenu introuvable.")
         }
 
-        try BasicContentFilter.validate(details)
+        let cleanDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanDetails.count <= 1_000 else {
+            throw TorpilleError.missingData("Le contexte du signalement est limité à 1 000 caractères.")
+        }
         var payload: [String: Any] = [
             "reporterUid": uid,
             "contentId": cleanContentId,
             "contentType": contentType.rawValue,
             "reason": reason.rawValue,
-            "details": details.trimmingCharacters(in: .whitespacesAndNewlines),
+            "details": cleanDetails,
             "status": "open",
             "createdAt": Timestamp(date: Date()),
             "updatedAt": Timestamp(date: Date())

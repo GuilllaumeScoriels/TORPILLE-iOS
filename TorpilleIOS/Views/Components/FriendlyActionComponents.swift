@@ -317,3 +317,27 @@ extension View {
         modifier(MainTabScreenSpacingModifier())
     }
 }
+
+struct TorpilleLoadingView: View {
+    var title: String? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    init(_ title: String? = nil) { self.title = title }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image("TorpilleLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 48, maxHeight: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .opacity(pulse && !reduceMotion ? 0.45 : 1)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+            if let title { Text(title).font(.caption).foregroundStyle(.secondary) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title ?? "Chargement…")
+        .onAppear { pulse = true }
+    }
+}

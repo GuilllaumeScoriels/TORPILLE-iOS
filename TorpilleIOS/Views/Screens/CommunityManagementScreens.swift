@@ -12,35 +12,37 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+import UIKit
 
 private struct ResponseTimePickerCard: View {
     @Binding var hours: Int
     @Binding var minutes: Int
+    @EnvironmentObject private var languageService: AppLanguageService
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Temps de réponse")
+            Text(languageService.phrase("Temps de réponse"))
                 .font(.subheadline.weight(.semibold))
 
             HStack(spacing: 12) {
-                Picker("Heures", selection: $hours) {
+                Picker(languageService.phrase("Heures"), selection: $hours) {
                     ForEach(0..<24, id: \.self) { value in
-                        Text(value == 1 ? "1 heure" : "\(value) heures").tag(value)
+                        Text(languageService.hoursLabel(value)).tag(value)
                     }
                 }
                 .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Picker("Minutes", selection: $minutes) {
+                Picker(languageService.phrase("Minutes"), selection: $minutes) {
                     ForEach(0..<60, id: \.self) { value in
-                        Text(value == 1 ? "1 minute" : "\(value) minutes").tag(value)
+                        Text(languageService.minutesLabel(value)).tag(value)
                     }
                 }
                 .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text("Délai actuel : \(formatResponseTime(Int64(hours * 3600 + minutes * 60)))")
+            Text(languageService.currentDelayLabel(formatResponseTime(Int64(hours * 3600 + minutes * 60))))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -52,12 +54,14 @@ private struct ResponseTimePickerCard: View {
 
 struct CreateCommunityScreen: View {
     @StateObject private var vm: CreateCommunityViewModel
+    @ObservedObject private var languageService: AppLanguageService
     let onCreated: (String) -> Void
     let onBack: () -> Void
 
     init(env: AppEnvironment, onCreated: @escaping (String) -> Void, onBack: @escaping () -> Void) {
         self.onCreated = onCreated
         self.onBack = onBack
+        _languageService = ObservedObject(wrappedValue: env.languageService)
         _vm = StateObject(wrappedValue: CreateCommunityViewModel(repo: env.communityRepository, userRepo: env.userRepository))
     }
 
@@ -65,8 +69,8 @@ struct CreateCommunityScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 WelcomeHeroCard(
-                    title: "Nouvelle communauté",
-                    subtitle: "Crée un espace accueillant, règle son tempo et invite tes joueurs.",
+                    title: languageService.phrase("Nouvelle communauté"),
+                    subtitle: languageService.phrase("Crée un espace accueillant, règle son tempo et invite tes joueurs."),
                     primarySymbol: "person.3.fill",
                     secondarySymbol: "flag.checkered.2.crossed",
                     cornerSymbol: "plus.circle.fill",
@@ -74,14 +78,14 @@ struct CreateCommunityScreen: View {
                 )
 
                 VStack(alignment: .leading, spacing: 14) {
-                    TextField("Nom", text: $vm.name)
+                    TextField(languageService.phrase("Nom"), text: $vm.name)
                         .padding()
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                     ResponseTimePickerCard(hours: $vm.responseHours, minutes: $vm.responseMinutes)
 
-                    Toggle("Communauté publique", isOn: $vm.isPublic)
+                    Toggle(languageService.phrase("Communauté publique"), isOn: $vm.isPublic)
                         .padding()
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -94,8 +98,8 @@ struct CreateCommunityScreen: View {
                     vm.create(onCreated: onCreated)
                 } label: {
                     IllustratedActionButton(
-                        title: vm.isLoading ? "Création…" : "Créer",
-                        subtitle: "Valide les paramètres et ouvre la communauté.",
+                        title: vm.isLoading ? languageService.phrase("Création…") : languageService.phrase("Créer"),
+                        subtitle: languageService.phrase("Valide les paramètres et ouvre la communauté."),
                         systemImage: "plus.circle.fill",
                         illustrationSymbol: "person.3.sequence.fill",
                         accent: .meadow
@@ -105,12 +109,12 @@ struct CreateCommunityScreen: View {
                 .disabled(vm.isLoading || vm.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button(action: onBack) {
-                    CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .slate)
+                    CompactActionButton(title: languageService.phrase("Retour"), systemImage: "arrow.left.circle.fill", accent: .slate)
                 }
                 .buttonStyle(.plain)
 
                 if let error = vm.error {
-                    Text(error)
+                    Text(languageService.localizedRuntimeMessage(error))
                         .foregroundStyle(.red)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -121,12 +125,16 @@ struct CreateCommunityScreen: View {
             .padding()
         }
         .background(Color(.systemBackground))
-        .navigationTitle("Créer")
+        .navigationTitle(languageService.phrase("Créer"))
+        .iosBackSwipe {
+            onBack()
+        }
     }
 }
 
 struct JoinCommunityScreen: View {
     @StateObject private var vm: JoinCommunityViewModel
+    @ObservedObject private var languageService: AppLanguageService
     let communityId: String
     let onJoined: () -> Void
     let onCancel: () -> Void
@@ -135,24 +143,25 @@ struct JoinCommunityScreen: View {
         self.communityId = communityId
         self.onJoined = onJoined
         self.onCancel = onCancel
+        _languageService = ObservedObject(wrappedValue: env.languageService)
         _vm = StateObject(wrappedValue: JoinCommunityViewModel(repo: env.communityRepository, userRepo: env.userRepository))
     }
 
     var body: some View {
         VStack(spacing: 18) {
             WelcomeHeroCard(
-                title: "Invitation communauté",
-                subtitle: "Patiente un instant pendant que Torpille vérifie ton invitation.",
+                title: languageService.phrase("Invitation communauté"),
+                subtitle: languageService.phrase("Patiente un instant pendant que Torpille vérifie ton invitation."),
                 primarySymbol: "envelope.open.fill",
                 secondarySymbol: "person.2.badge.plus",
                 cornerSymbol: "checkmark.circle.fill",
                 accent: .ocean
             )
 
-            if vm.loading { ProgressView() }
+            if vm.loading { TorpilleLoadingView() }
 
             if let error = vm.error {
-                Text(error)
+                Text(languageService.localizedRuntimeMessage(error))
                     .foregroundStyle(.red)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,12 +169,22 @@ struct JoinCommunityScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
+            if let infoMessage = vm.infoMessage {
+                Text(languageService.localizedRuntimeMessage(infoMessage))
+                    .foregroundStyle(.green)
+                    .multilineTextAlignment(.center)
+                    .padding()
+            }
+
             Button(action: onCancel) {
-                CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .coral)
+                CompactActionButton(title: languageService.phrase("Retour"), systemImage: "arrow.left.circle.fill", accent: .coral)
             }
             .buttonStyle(.plain)
         }
         .padding()
+        .iosBackSwipe {
+            onCancel()
+        }
         .task {
             await vm.join(communityId, onJoined: onJoined)
         }
@@ -174,33 +193,50 @@ struct JoinCommunityScreen: View {
 
 struct CommunityInfoScreen: View {
     @StateObject private var vm: CommunityInfoViewModel
+    @ObservedObject private var languageService: AppLanguageService
     private let env: AppEnvironment
     let communityId: String
     let onBack: () -> Void
+    @State private var reportingMember: Member?
+    @State private var memberPendingBlock: Member?
+    @State private var showsDeleteCommunityConfirmation = false
 
     init(env: AppEnvironment, communityId: String, onBack: @escaping () -> Void) {
         self.env = env
         self.communityId = communityId
         self.onBack = onBack
-        _vm = StateObject(wrappedValue: CommunityInfoViewModel(repo: env.communityRepository))
+        _languageService = ObservedObject(wrappedValue: env.languageService)
+        _vm = StateObject(wrappedValue: CommunityInfoViewModel(repo: env.communityRepository, userRepo: env.userRepository))
     }
 
     var body: some View {
         List {
             Section {
                 Button(action: onBack) {
-                    CompactActionButton(title: "Retour à la discussion", systemImage: "arrow.left.circle.fill", accent: .slate)
+                    CompactActionButton(title: languageService.phrase("Retour à la discussion"), systemImage: "arrow.left.circle.fill", accent: .slate)
                 }
                 .buttonStyle(.plain)
 
-                Text(vm.community?.name ?? "Communauté")
+                Text(vm.community?.name ?? languageService.text(.savedReelsCommunity))
                     .font(.title2.weight(.bold))
 
                 if let community = vm.community {
-                    Text("Invitation : https://torpille-38783.web.app/join.html?cid=\(community.stableId)")
-                        .font(.footnote)
-                        .textSelection(.enabled)
-                    Text("La page d’invitation permet de rejoindre cette communauté.")
+                    let link = invitationLink(for: community.stableId)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(languageService.invitationLinkLabel(""))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(link)
+                            .font(.footnote)
+                            .textSelection(.enabled)
+                        Button {
+                            UIPasteboard.general.string = link
+                        } label: {
+                            Label(languageService.copyInvitationLinkLabel, systemImage: "doc.on.doc.fill")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Text(languageService.phrase("La page d’invitation permet de rejoindre cette communauté."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -209,7 +245,7 @@ struct CommunityInfoScreen: View {
                     } label: {
                         HStack {
                             CompactActionButton(
-                                title: "Contenus enregistres",
+                                title: languageService.phrase("Contenus enregistres"),
                                 systemImage: "bookmark.fill",
                                 accent: .gold
                             )
@@ -227,94 +263,286 @@ struct CommunityInfoScreen: View {
 
             if let infoMessage = vm.infoMessage {
                 Section {
-                    Text(infoMessage)
+                    Text(languageService.localizedRuntimeMessage(infoMessage))
                         .foregroundStyle(.green)
                 }
             }
 
-            if vm.community != nil {
-                Section("Paramètres") {
-                    Toggle("Communauté publique", isOn: $vm.isPublic)
+            if vm.canModerateMembers {
+                Section(languageService.phrase("Paramètres")) {
+                    Toggle(languageService.phrase("Communauté publique"), isOn: $vm.isPublic)
                     ResponseTimePickerCard(hours: $vm.responseHours, minutes: $vm.responseMinutes)
                     Button {
                         vm.saveSettings(communityId: communityId)
                     } label: {
-                        CompactActionButton(title: "Enregistrer", systemImage: "square.and.arrow.down.fill", accent: .meadow)
+                        CompactActionButton(title: languageService.phrase("Enregistrer"), systemImage: "square.and.arrow.down.fill", accent: .meadow)
                     }
                     .buttonStyle(.plain)
                 }
+
+                Section(languageService.phrase("Zone dangereuse")) {
+                    Button(role: .destructive) {
+                        showsDeleteCommunityConfirmation = true
+                    } label: {
+                        Label(
+                            vm.isDeletingCommunity
+                                ? languageService.phrase("Suppression en cours…")
+                                : languageService.phrase("Supprimer la communauté"),
+                            systemImage: "trash.fill"
+                        )
+                    }
+                    .disabled(vm.isDeletingCommunity)
+                }
             }
 
-            Section("Participants") {
-                ForEach(vm.members) { member in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(member.displayName)
+
+            if vm.canModerateMembers, !vm.pendingJoinRequests.isEmpty {
+                Section(languageService.phrase("Demandes pour rejoindre")) {
+                    ForEach(vm.pendingJoinRequests) { request in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(request.requesterPseudo.isEmpty ? languageService.phrase("Utilisateur") : "@\(request.requesterPseudo)")
                                 .font(.headline)
+                            HStack {
+                                Button {
+                                    vm.resolveJoinRequest(request, accept: true)
+                                } label: {
+                                    Label(languageService.phrase("Accepter"), systemImage: "checkmark.circle.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
 
-                            if member.uid == vm.community?.adminUid {
-                                Text("Admin")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(ActionAccent.ocean.tint)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(ActionAccent.ocean.tint.opacity(0.12))
-                                    .clipShape(Capsule())
+                                Button(role: .destructive) {
+                                    vm.resolveJoinRequest(request, accept: false)
+                                } label: {
+                                    Label(languageService.phrase("Refuser"), systemImage: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.bordered)
                             }
-
-                            Spacer(minLength: 0)
                         }
-                        Text("XP : \(member.xpInCommunity)")
-                            .font(.subheadline)
-                        Text(member.pendingTorpilleId == nil ? "OK" : "Torpillé en attente")
-                            .font(.caption)
-                            .foregroundStyle(member.pendingTorpilleId == nil ? .green : .orange)
+                    }
+                }
+            }
+
+            Section {
+                Text(languageService.phrase("Participants"))
+                    .font(.headline)
+
+                if vm.members.isEmpty {
+                    Text(languageService.phrase("Aucun participant pour le moment."))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(vm.members) { member in
+                    HStack(spacing: 12) {
+                        Button {
+                            vm.openPublicProfile(for: member)
+                        } label: {
+                            if let profileIcon = member.profileIcon, !profileIcon.isEmpty {
+                                EmojiAvatarView(profileIcon: profileIcon, size: 42)
+                            } else {
+                                ProfileAvatarImageView(
+                                    imageData: nil,
+                                    photoURL: member.photoUrl,
+                                    fallbackSymbol: "person.fill",
+                                    size: 42
+                                )
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(member.displayName)
+                                    .font(.headline)
+
+                                if member.uid == vm.community?.adminUid {
+                                    Text(languageService.phrase("Admin"))
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ActionAccent.ocean.tint)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(ActionAccent.ocean.tint.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }
+
+                                Spacer(minLength: 0)
+                            }
+                            Text(languageService.xpInCommunityLabel(member.xpInCommunity))
+                                .font(.subheadline)
+                            Text(languageService.phrase(member.pendingTorpilleId == nil ? "OK" : "Torpillé en attente"))
+                                .font(.caption)
+                                .foregroundStyle(member.pendingTorpilleId == nil ? .green : .orange)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        if member.uid != env.communityRepository.currentUID {
+                            Menu {
+                                participantActions(for: member)
+                            } label: {
+                                Image(systemName: "ellipsis.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(ActionAccent.slate.tint)
+                                    .frame(width: 36, height: 36)
+                            }
+                            .accessibilityLabel(languageService.actionsForMemberLabel(member.displayName))
+                        }
                     }
                     .padding(.vertical, 4)
-                    .contextMenu {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if member.uid != env.communityRepository.currentUID {
-                            Button {
-                                vm.hideContentFromMember(communityId: communityId, member: member)
+                            Button(role: .destructive) {
+                                memberPendingBlock = member
                             } label: {
-                                Label("Masquer ses contenus ici", systemImage: "eye.slash.fill")
+                                Label(languageService.phrase("Bloquer"), systemImage: "person.crop.circle.badge.xmark")
                             }
 
-                            Button(role: .destructive) {
-                                vm.blockMember(member)
+                            Button {
+                                reportingMember = member
                             } label: {
-                                Label("Bloquer cet utilisateur", systemImage: "person.crop.circle.badge.xmark")
+                                Label(languageService.phrase("Signaler"), systemImage: "exclamationmark.bubble.fill")
                             }
+                            .tint(.orange)
+                        }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        if member.uid != env.communityRepository.currentUID, !vm.isFriend(member) {
+                            Button {
+                                vm.sendFriendRequest(to: member)
+                            } label: {
+                                Label(languageService.phrase("Ajouter"), systemImage: "person.badge.plus")
+                            }
+                            .tint(ActionAccent.meadow.tint)
+                        }
+                    }
+                    .contextMenu {
+                        if member.uid != env.communityRepository.currentUID {
+                            participantActions(for: member)
                         }
 
                         if vm.canModerateMembers, member.uid != vm.community?.adminUid {
                             Divider()
                             Button(role: .destructive) {
-                                vm.removeMember(communityId: communityId, member: member)
-                            } label: {
-                                Label("Retirer de la communauté", systemImage: "person.crop.circle.badge.minus")
-                            }
-
-                            Button(role: .destructive) {
                                 vm.banMember(communityId: communityId, member: member)
                             } label: {
-                                Label("Bannir", systemImage: "hand.raised.fill")
+                                Label(languageService.phrase("Bannir"), systemImage: "hand.raised.fill")
                             }
                         }
                     }
                 }
+                }
             }
 
             if let error = vm.error {
-                Section { Text(error).foregroundStyle(.red) }
+                Section { Text(languageService.localizedRuntimeMessage(error)).foregroundStyle(.red) }
             }
         }
-        .navigationTitle("Infos communauté")
+        .navigationTitle(languageService.phrase("Infos communauté"))
+        .iosBackSwipe {
+            onBack()
+        }
         .onAppear { vm.start(communityId: communityId) }
+        .navigationDestination(isPresented: Binding(
+            get: { vm.selectedPublicProfile != nil },
+            set: { if !$0 { vm.selectedPublicProfile = nil } }
+        )) {
+            if let profile = vm.selectedPublicProfile {
+                SharedPublicUserProfileView(profile: profile)
+            }
+        }
+        .sheet(item: $reportingMember) { member in
+            ReportContentSheet(
+                title: languageService.phrase("Signaler cet utilisateur"),
+                reportedName: "@\(member.displayName)",
+                onCancel: {
+                    reportingMember = nil
+                },
+                onSubmit: { reason, details in
+                    vm.reportMember(communityId: communityId, member: member, reason: reason, details: details)
+                    reportingMember = nil
+                }
+            )
+        }
+        .alert(languageService.phrase("Bloquer cet utilisateur ?"), isPresented: Binding(
+            get: { memberPendingBlock != nil },
+            set: { if !$0 { memberPendingBlock = nil } }
+        )) {
+            Button(languageService.phrase("Annuler"), role: .cancel) {
+                memberPendingBlock = nil
+            }
+            Button(languageService.phrase("Bloquer"), role: .destructive) {
+                if let member = memberPendingBlock {
+                    vm.blockMember(member)
+                }
+                memberPendingBlock = nil
+            }
+        } message: {
+            Text(languageService.phrase("Cet utilisateur sera masqué dans l'application. Pour le débloquer, va dans ton profil."))
+        }
+        .alert(languageService.phrase("Supprimer cette communauté ?"), isPresented: $showsDeleteCommunityConfirmation) {
+            Button(languageService.phrase("Annuler"), role: .cancel) {}
+            Button(languageService.phrase("Supprimer définitivement"), role: .destructive) {
+                vm.deleteCommunity(communityId: communityId, onDeleted: onBack)
+            }
+        } message: {
+            Text(languageService.phrase("La communauté et tous ses contenus, enregistrés ou non, seront supprimés définitivement. Cette action est irréversible."))
+        }
+    }
+
+    @ViewBuilder
+    private func participantActions(for member: Member) -> some View {
+        if !vm.isFriend(member) {
+            Button {
+                vm.sendFriendRequest(to: member)
+            } label: {
+                Label(languageService.phrase("Ajouter comme ami"), systemImage: "person.badge.plus")
+            }
+        }
+
+        Button {
+            reportingMember = member
+        } label: {
+            Label(languageService.phrase("Signaler cet utilisateur"), systemImage: "exclamationmark.bubble.fill")
+        }
+
+        if vm.isContentHidden(for: member) {
+            Button {
+                vm.showContentFromMember(communityId: communityId, member: member)
+            } label: {
+                Label(languageService.phrase("Réafficher ses contenus ici"), systemImage: "eye.fill")
+            }
+        } else {
+            Button {
+                vm.hideContentFromMember(communityId: communityId, member: member)
+            } label: {
+                Label(languageService.phrase("Masquer ses contenus ici"), systemImage: "eye.slash.fill")
+            }
+        }
+
+        Button(role: .destructive) {
+            memberPendingBlock = member
+        } label: {
+            Label(languageService.phrase("Bloquer cet utilisateur"), systemImage: "person.crop.circle.badge.xmark")
+        }
+
+        if vm.canModerateMembers, member.uid != vm.community?.adminUid {
+            Divider()
+            Button(role: .destructive) {
+                vm.removeMember(communityId: communityId, member: member)
+            } label: {
+                Label(languageService.phrase("Retirer de la communauté"), systemImage: "person.crop.circle.badge.minus")
+            }
+        }
+    }
+
+    private func invitationLink(for communityId: String) -> String {
+        let languageCode = languageService.effectiveLanguage.localeIdentifier
+        return "https://torpille-38783.web.app/join.html?cid=\(communityId)&lang=\(languageCode)"
     }
 }
 
 struct SavedCommunityMessagesScreen: View {
     @StateObject private var vm: SavedCommunityMessagesViewModel
+    @EnvironmentObject private var languageService: AppLanguageService
     let communityId: String
 
     @State private var selectedStoryIndex = 0
@@ -337,9 +565,9 @@ struct SavedCommunityMessagesScreen: View {
         List {
             if vm.messages.isEmpty {
                 ContentUnavailableView(
-                    "Aucun contenu enregistre",
+                    languageService.phrase("Aucun contenu enregistre"),
                     systemImage: "bookmark.slash",
-                    description: Text("Maintiens un contenu appuye dans la discussion pour l'enregistrer ici.")
+                    description: Text(languageService.phrase("Maintiens un contenu appuye dans la discussion pour l'enregistrer ici."))
                 )
                 .listRowBackground(Color.clear)
             } else {
@@ -358,7 +586,7 @@ struct SavedCommunityMessagesScreen: View {
                                 Button(role: .destructive) {
                                     vm.removeFromMemories(communityId: communityId, message: message)
                                 } label: {
-                                    Label("Retirer des Memories", systemImage: "trash")
+                                    Label(languageService.phrase("Retirer des Memories"), systemImage: "trash")
                                         .font(.footnote.weight(.semibold))
                                         .foregroundStyle(.red)
                                 }
@@ -367,7 +595,7 @@ struct SavedCommunityMessagesScreen: View {
                                 Button {
                                     vm.publishToMemories(communityId: communityId, message: message)
                                 } label: {
-                                    Label("Publier en Memories", systemImage: "play.rectangle.fill")
+                                    Label(languageService.phrase("Publier en Memories"), systemImage: "play.rectangle.fill")
                                         .font(.footnote.weight(.semibold))
                                         .foregroundStyle(ActionAccent.coral.tint)
                                 }
@@ -380,19 +608,19 @@ struct SavedCommunityMessagesScreen: View {
 
             if let infoMessage = vm.infoMessage {
                 Section {
-                    Text(infoMessage)
+                    Text(languageService.localizedRuntimeMessage(infoMessage))
                         .foregroundStyle(.green)
                 }
             }
 
             if let error = vm.error {
                 Section {
-                    Text(error)
+                    Text(languageService.localizedRuntimeMessage(error))
                         .foregroundStyle(.red)
                 }
             }
         }
-        .navigationTitle("Contenus enregistres")
+        .navigationTitle(languageService.phrase("Contenus enregistres"))
         .onAppear { vm.start(communityId: communityId) }
         .fullScreenCover(isPresented: $showStoriesViewer) {
             SavedMessagesStoriesViewer(
@@ -417,7 +645,7 @@ struct SavedCommunityMessagesScreen: View {
             if isLoadingMedia {
                 ZStack {
                     Color.black.opacity(0.15).ignoresSafeArea()
-                    ProgressView("Chargement du media…")
+                    TorpilleLoadingView(languageService.phrase("Chargement du media…"))
                         .padding()
                         .background(.thinMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -450,7 +678,7 @@ struct SavedCommunityMessagesScreen: View {
                     .lineLimit(2)
 
                 if let savedAt = message.savedAt?.dateValue() {
-                    Text("Enregistre le \(savedAt.formatted(date: .abbreviated, time: .shortened))")
+                    Text(languageService.savedAtLabel(savedAt.formatted(date: .abbreviated, time: .shortened)))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -477,18 +705,18 @@ struct SavedCommunityMessagesScreen: View {
     private func messageSummary(for message: Message) -> String {
         switch message.type {
         case "text":
-            return message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : "Message texte"
+            return message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : languageService.phrase("Message texte")
         case "image":
-            return "Image"
+            return languageService.phrase("Image")
         case "video":
             if let taggedPseudo = message.taggedPseudo, !taggedPseudo.isEmpty {
-                return "Video pour @\(taggedPseudo)"
+                return languageService.videoForUserLabel(taggedPseudo)
             }
-            return "Video"
+            return languageService.phrase("Video")
         case "audio":
-            return "Message vocal"
+            return languageService.phrase("Message vocal")
         default:
-            return "Contenu"
+            return languageService.phrase("Contenu")
         }
     }
 
@@ -550,7 +778,10 @@ struct SavedCommunityMessagesScreen: View {
         defer { isLoadingMedia = false }
         do {
             let url = try await vm.resolvePlaybackURL(for: message)
+            try MediaAudioSession.activatePlayback()
             let player = AVPlayer(url: url)
+            player.isMuted = false
+            player.volume = 1
             audioPlayer?.pause()
             audioPlayer = player
             playingAudioMessageId = message.stableId
@@ -563,6 +794,7 @@ struct SavedCommunityMessagesScreen: View {
 
 private struct SavedMessagesStoriesViewer: View {
     @ObservedObject var vm: SavedCommunityMessagesViewModel
+    @EnvironmentObject private var languageService: AppLanguageService
     let communityId: String
     let messages: [Message]
     let initialIndex: Int
@@ -575,7 +807,7 @@ private struct SavedMessagesStoriesViewer: View {
             Color.black.ignoresSafeArea()
 
             if messages.isEmpty {
-                ContentUnavailableView("Aucun contenu enregistre", systemImage: "bookmark.slash")
+                ContentUnavailableView(languageService.phrase("Aucun contenu enregistre"), systemImage: "bookmark.slash")
                     .foregroundStyle(.white)
             } else {
                 TabView(selection: $selection) {
@@ -585,6 +817,22 @@ private struct SavedMessagesStoriesViewer: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+
+                HStack(spacing: 0) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard selection > 0 else { return }
+                            selection -= 1
+                        }
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard selection < messages.count - 1 else { return }
+                            selection += 1
+                        }
+                }
+                .ignoresSafeArea()
 
                 VStack(spacing: 18) {
                     HStack(spacing: 4) {
@@ -599,7 +847,7 @@ private struct SavedMessagesStoriesViewer: View {
                     HStack {
                         Spacer()
                         Button {
-                            dismiss()
+                            closeViewer()
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.headline.weight(.bold))
@@ -637,7 +885,7 @@ private struct SavedMessagesStoriesViewer: View {
                                 Button {
                                     vm.removeFromMemories(communityId: communityId, message: messages[selection])
                                 } label: {
-                                    Label("Retirer", systemImage: "trash")
+                                    Label(languageService.phrase("Retirer"), systemImage: "trash")
                                         .font(.footnote.weight(.semibold))
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 10)
@@ -650,7 +898,7 @@ private struct SavedMessagesStoriesViewer: View {
                                 Button {
                                     vm.publishToMemories(communityId: communityId, message: messages[selection])
                                 } label: {
-                                    Label("Publier", systemImage: "sparkles.tv.fill")
+                                    Label(languageService.phrase("Publier"), systemImage: "sparkles.tv.fill")
                                         .font(.footnote.weight(.semibold))
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 10)
@@ -668,41 +916,38 @@ private struct SavedMessagesStoriesViewer: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 24)
                 }
-
-                HStack(spacing: 0) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard selection > 0 else { return }
-                            selection -= 1
-                        }
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard selection < messages.count - 1 else { return }
-                            selection += 1
-                        }
-                }
-                .ignoresSafeArea()
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .local)
+                .onEnded { value in
+                    let verticalMovement = value.translation.height
+                    let horizontalMovement = abs(value.translation.width)
+                    guard verticalMovement > 90, verticalMovement > horizontalMovement * 1.2 else { return }
+                    closeViewer()
+                }
+        )
         .onAppear {
             selection = min(max(initialIndex, 0), max(messages.count - 1, 0))
         }
     }
 
+    private func closeViewer() {
+        dismiss()
+    }
+
     private func storySummary(for message: Message) -> String {
         switch message.type {
         case "text":
-            return message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : "Message texte"
+            return message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : languageService.phrase("Message texte")
         case "image":
-            return "Photo enregistree"
+            return languageService.phrase("Photo enregistree")
         case "video":
-            return message.torpilleId?.isEmpty == false ? "Torpille enregistree" : "Video enregistree"
+            return languageService.phrase(message.torpilleId?.isEmpty == false ? "Torpille enregistree" : "Video enregistree")
         case "audio":
-            return "Message vocal enregistre"
+            return languageService.phrase("Message vocal enregistre")
         default:
-            return "Contenu enregistre"
+            return languageService.phrase("Contenu enregistre")
         }
     }
 }
@@ -710,6 +955,7 @@ private struct SavedMessagesStoriesViewer: View {
 private struct SavedStoryPage: View {
     let message: Message
     @ObservedObject var vm: SavedCommunityMessagesViewModel
+    @EnvironmentObject private var languageService: AppLanguageService
 
     @State private var resolvedURL: URL?
     @State private var loadingError: String?
@@ -752,7 +998,7 @@ private struct SavedStoryPage: View {
                     player?.pause()
                 }
         } else if isLoading {
-            ProgressView("Chargement…")
+            TorpilleLoadingView(languageService.phrase("Chargement…"))
                 .tint(.white)
         } else if let loadingError {
             Text(loadingError)
@@ -770,11 +1016,11 @@ private struct SavedStoryPage: View {
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } placeholder: {
-                ProgressView("Chargement…")
+                TorpilleLoadingView(languageService.phrase("Chargement…"))
                     .tint(.white)
             }
         } else if isLoading {
-            ProgressView("Chargement…")
+            TorpilleLoadingView(languageService.phrase("Chargement…"))
                 .tint(.white)
         } else if let loadingError {
             Text(loadingError)
@@ -789,7 +1035,7 @@ private struct SavedStoryPage: View {
                 .font(.system(size: 90))
                 .foregroundStyle(.white)
 
-            Text("Message vocal")
+            Text(languageService.phrase("Message vocal"))
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.white)
 
@@ -802,7 +1048,7 @@ private struct SavedStoryPage: View {
             Button {
                 toggleAudioPlayback()
             } label: {
-                Label(isAudioPlaying ? "Pause" : "Ecouter", systemImage: isAudioPlaying ? "pause.fill" : "play.fill")
+                Label(languageService.phrase(isAudioPlaying ? "Pause" : "Ecouter"), systemImage: isAudioPlaying ? "pause.fill" : "play.fill")
                     .font(.headline.weight(.semibold))
                     .padding(.horizontal, 22)
                     .padding(.vertical, 14)
@@ -821,7 +1067,7 @@ private struct SavedStoryPage: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.white.opacity(0.92))
 
-            Text(message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : "Message texte")
+            Text(message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? message.text! : languageService.phrase("Message texte"))
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
         }

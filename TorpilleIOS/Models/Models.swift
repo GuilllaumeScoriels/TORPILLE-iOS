@@ -1,10 +1,27 @@
 import Foundation
 import FirebaseFirestore
 
+enum ProfileSex: String, Codable, CaseIterable, Identifiable {
+    case male
+    case female
+    case nonBinary = "non_binary"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .male: return "Homme"
+        case .female: return "Femme"
+        case .nonBinary: return "Non binaire"
+        }
+    }
+}
+
 struct UserProfile: Codable, Identifiable {
     @DocumentID var documentId: String?
     var uid: String = ""
     var email: String?
+    var firstName: String = ""
+    var lastName: String = ""
     var pseudo: String = ""
     var pseudoKey: String = ""
     var photoUrl: String?
@@ -17,7 +34,15 @@ struct UserProfile: Codable, Identifiable {
     var languageCode: String?
     var isLanguagePublic: Bool = true
     var isLeaderboardPublic: Bool = true
+    var isGhostMode: Bool = false
     var friendsCount: Int = 0
+    var birthDate: Timestamp?
+    var sex: ProfileSex?
+    var city: String?
+    var bio: String?
+    var lastLatitude: Double?
+    var lastLongitude: Double?
+    var lastLocationUpdatedAt: Timestamp?
     var termsAcceptedAt: Timestamp?
     var moderationRulesAcceptedAt: Timestamp?
     var updatedAt: Timestamp?
@@ -28,9 +53,22 @@ struct UserProfile: Codable, Identifiable {
 
     var hasRequiredIdentity: Bool {
         let hasPseudo = !pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasLegalName = !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAvatar = photoUrl?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             || profileIcon?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return hasPseudo && hasAvatar && termsAcceptedAt != nil && moderationRulesAcceptedAt != nil
+        return hasLegalName && hasPseudo && hasAvatar && termsAcceptedAt != nil && moderationRulesAcceptedAt != nil
+    }
+
+    var missingRequiredProfileFields: [String] {
+        var fields: [String] = []
+        if firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fields.append("prénom") }
+        if lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fields.append("nom") }
+        if pseudo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fields.append("pseudo") }
+        if photoUrl?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+           profileIcon?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false { fields.append("avatar") }
+        if termsAcceptedAt == nil || moderationRulesAcceptedAt == nil { fields.append("acceptation des règles") }
+        return fields
     }
 }
 
@@ -51,6 +89,30 @@ struct Community: Codable, Identifiable {
     }
 }
 
+enum CommunityJoinRequestStatus: String, Codable {
+    case pending
+    case accepted
+    case rejected
+}
+
+struct CommunityJoinRequest: Codable, Identifiable {
+    @DocumentID var documentId: String?
+    var communityId: String = ""
+    var communityName: String = ""
+    var requesterUid: String = ""
+    var requesterPseudo: String = ""
+    var requesterPhotoUrl: String?
+    var requesterProfileIcon: String?
+    var adminUid: String = ""
+    var status: String = CommunityJoinRequestStatus.pending.rawValue
+    var createdAt: Timestamp?
+    var updatedAt: Timestamp?
+    var resolvedAt: Timestamp?
+    var reminderSentAt: Timestamp?
+
+    var id: String { documentId ?? "\(communityId)_\(requesterUid)" }
+}
+
 struct Member: Codable, Identifiable {
     @DocumentID var documentId: String?
     var uid: String = ""
@@ -62,6 +124,7 @@ struct Member: Codable, Identifiable {
     var pendingDeadlineAt: Timestamp?
     var pendingFromPseudo: String?
     var lastTorpilledAt: Timestamp?
+    var lastTorpilleSentAt: Timestamp?
     var lastRespondedAt: Timestamp?
     var overdueCount: Int64 = 0
     var lastLatitude: Double?
@@ -70,6 +133,7 @@ struct Member: Codable, Identifiable {
     var lastSeenTorpilleAt: Timestamp?
     var lastSeenMessageAt: Timestamp?
     var lastOpenedAt: Timestamp?
+    var lastActiveAt: Timestamp?
 
     var id: String { uid.isEmpty ? (documentId ?? UUID().uuidString) : uid }
 }
@@ -115,7 +179,7 @@ struct Message: Codable, Identifiable {
     }
 
     var isQuarantined: Bool {
-        moderationStatus == "quarantined" || moderationStatus == "removed"
+        moderationStatus != nil && moderationStatus != "visible"
     }
 }
 
@@ -154,7 +218,7 @@ struct Torpille: Codable, Identifiable {
     }
 
     var isQuarantined: Bool {
-        moderationStatus == "quarantined" || moderationStatus == "removed"
+        moderationStatus != nil && moderationStatus != "visible"
     }
 }
 
@@ -186,7 +250,7 @@ struct PublishedReel: Codable, Identifiable {
     }
 
     var isQuarantined: Bool {
-        moderationStatus == "quarantined" || moderationStatus == "removed"
+        moderationStatus != nil && moderationStatus != "visible"
     }
 
     enum CodingKeys: String, CodingKey {
@@ -198,6 +262,8 @@ struct PublishedReel: Codable, Identifiable {
         case communityName
         case authorUid
         case authorPseudo
+        case authorPhotoUrl
+        case authorProfileIcon
         case videoUrl
         case videoBucket
         case videoPath
@@ -260,6 +326,7 @@ struct UploadedVideo {
 struct UploadedAudio {
     let bucket: String
     let storagePath: String
+    let downloadURL: String
     let durationSeconds: Double
 }
 
@@ -273,7 +340,7 @@ struct SignedURLResponse: Codable {
     let signedUrl: String
 }
 
-struct MapMemberAnnotation: Identifiable {
+struct MapMemberAnnotation: Identifiable, Equatable {
     let id: String
     let pseudo: String
     let latitude: Double
@@ -351,4 +418,15 @@ struct FriendRequest: Codable, Identifiable {
     var updatedAt: Timestamp?
 
     var id: String { documentId ?? "\(fromUid)_\(toUid)" }
+}
+
+struct FriendRemoval: Codable, Identifiable {
+    @DocumentID var documentId: String?
+    var actorUid: String = ""
+    var actorPseudo: String = ""
+    var toUid: String = ""
+    var type: String = "friendRemoved"
+    var createdAt: Timestamp?
+
+    var id: String { documentId ?? UUID().uuidString }
 }

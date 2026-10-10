@@ -35,6 +35,15 @@ final class TorpilleAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
 }
 
 final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
+    private func publishFCMToken(_ token: String?) {
+        guard let token, !token.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: .torpilleDidReceiveFCMToken,
+            object: nil,
+            userInfo: ["token": token]
+        )
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -45,6 +54,13 @@ final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDeleg
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+        Messaging.messaging().token { [weak self] token, error in
+            if let error {
+                print("🔔 FCM token fetch after APNs registration failed =", error)
+                return
+            }
+            self?.publishFCMToken(token)
+        }
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -52,12 +68,7 @@ final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDeleg
     }
 
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-        guard let fcmToken, !fcmToken.isEmpty else { return }
-        NotificationCenter.default.post(
-            name: .torpilleDidReceiveFCMToken,
-            object: nil,
-            userInfo: ["token": fcmToken]
-        )
+        publishFCMToken(fcmToken)
     }
 }
 
@@ -78,6 +89,15 @@ struct TorpilleIOSApp: App {
         firebaseConfigured = FirebaseApp.app() != nil
         env = firebaseConfigured ? AppEnvironment() : nil
         _ = env?.notificationCenterService
+
+        // Keep only a small in-memory cache. Reusable media bytes live mostly
+        // on disk and are evicted automatically instead of accumulating while
+        // users browse high-volume, mostly one-shot content.
+        URLCache.shared = URLCache(
+            memoryCapacity: 16 * 1024 * 1024,
+            diskCapacity: 256 * 1024 * 1024,
+            diskPath: "torpille-media-cache"
+        )
 
         let tabBarAppearance = UITabBarAppearance()
         tabBarAppearance.configureWithOpaqueBackground()
@@ -108,16 +128,18 @@ struct TorpilleIOSApp: App {
 }
 
 private struct FirebaseSetupRequiredView: View {
+    @StateObject private var languageService = AppLanguageService()
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 Image(systemName: "wrench.and.screwdriver.fill")
                     .font(.system(size: 42))
-                Text("Configuration Firebase requise")
+                Text(languageService.phrase("Configuration Firebase requise"))
                     .font(.title2)
                     .bold()
-                Text("Ajoute le fichier GoogleService-Info.plist iOS dans le groupe Resources du projet Xcode, puis relance l'application.")
-                Text("Le projet source peut s'ouvrir immédiatement dans Xcode, mais les fonctions Firebase ne démarreront qu'après l'ajout de ce fichier.")
+                Text(languageService.phrase("Ajoute le fichier GoogleService-Info.plist iOS dans le groupe Resources du projet Xcode, puis relance l'application."))
+                Text(languageService.phrase("Le projet source peut s'ouvrir immédiatement dans Xcode, mais les fonctions Firebase ne démarreront qu'après l'ajout de ce fichier."))
                     .foregroundStyle(.secondary)
                 Spacer()
             }

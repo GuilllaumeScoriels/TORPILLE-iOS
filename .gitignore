@@ -1,4 +1,6 @@
-cat > .gitignore << 'EOF'
+# macOS
+.DS_Store
+
 # Xcode
 DerivedData/
 build/
@@ -12,19 +14,43 @@ build/
 # Swift Package Manager
 .build/
 
-# CocoaPods (si utilisé)
+# CocoaPods
 Pods/
 
-# Carthage (si utilisé)
+# Carthage
 Carthage/Build/
 
-# Fastlane (si utilisé)
+# Fastlane
 fastlane/report.xml
 fastlane/Preview.html
-fastlane/screenshots
-fastlane/test_output
+fastlane/screenshots/
+fastlane/test_output/
 
-# User-specific
+# Firebase / Node
+functions/node_modules/
+node_modules/
+firestore-debug.log
+firebase-debug.log
+*-debug.log
+
+# Temporary / backup files
+*.orig
 *.swp
-.DS_Store
-EOF
+
+# Generated outputs
+outputs/
+
+# Deployment archives
+*.zip
+
+# Local environment / secrets
+.env
+.env.*
+*.local
+
+# Firebase local cache
+.firebase/
+
+# Firebase local configuration
+.firebaserc
+dossier_firebase_déploiement/

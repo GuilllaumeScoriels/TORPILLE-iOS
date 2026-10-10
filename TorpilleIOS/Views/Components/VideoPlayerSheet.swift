@@ -16,12 +16,17 @@ struct VideoPlayerSheet: View {
     let authorProfileIcon: String?
     let tagX: Double?
     let tagY: Double?
+    let allowsHoldToPause: Bool
     let onTap: ((VideoPlayerTapRegion) -> Void)?
     let onAuthorTap: (() -> Void)?
     let onEnded: (() -> Void)?
+    let onDismissRequest: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer
+    @State private var holdRecognitionTask: Task<Void, Never>?
+    @State private var isTouchActive = false
+    @State private var isPausedByHold = false
 
     init(
         url: URL,
@@ -33,9 +38,11 @@ struct VideoPlayerSheet: View {
         authorProfileIcon: String? = nil,
         tagX: Double?,
         tagY: Double?,
+        allowsHoldToPause: Bool = false,
         onTap: ((VideoPlayerTapRegion) -> Void)? = nil,
         onAuthorTap: (() -> Void)? = nil,
-        onEnded: (() -> Void)? = nil
+        onEnded: (() -> Void)? = nil,
+        onDismissRequest: (() -> Void)? = nil
     ) {
         self.url = url
         self.mediaType = mediaType
@@ -46,9 +53,11 @@ struct VideoPlayerSheet: View {
         self.authorProfileIcon = authorProfileIcon
         self.tagX = tagX
         self.tagY = tagY
+        self.allowsHoldToPause = allowsHoldToPause
         self.onTap = onTap
         self.onAuthorTap = onAuthorTap
         self.onEnded = onEnded
+        self.onDismissRequest = onDismissRequest
         _player = State(initialValue: AVPlayer(url: url))
     }
 
@@ -58,7 +67,11 @@ struct VideoPlayerSheet: View {
                 if mediaType == .video {
                     VideoPlayer(player: player)
                         .onAppear { configurePlayer() }
-                        .onDisappear { player.pause() }
+                        .onDisappear {
+                            holdRecognitionTask?.cancel()
+                            player.pause()
+                            player.replaceCurrentItem(with: nil)
+                        }
                         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: nil)) { notification in
                             guard let finishedItem = notification.object as? AVPlayerItem, finishedItem == player.currentItem else { return }
                             onEnded?()
@@ -71,7 +84,7 @@ struct VideoPlayerSheet: View {
                             .scaledToFit()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } placeholder: {
-                        ProgressView()
+                        TorpilleLoadingView()
                     }
                 }
 
@@ -79,9 +92,23 @@ struct VideoPlayerSheet: View {
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                updateHoldRecognition(for: value)
+                            }
                             .onEnded { value in
+                                isTouchActive = false
+                                holdRecognitionTask?.cancel()
+                                holdRecognitionTask = nil
+
+                                if isPausedByHold {
+                                    isPausedByHold = false
+                                    player.play()
+                                    return
+                                }
+
                                 if shouldDismiss(for: value) {
                                     player.pause()
+                                    onDismissRequest?()
                                     dismiss()
                                     return
                                 }
@@ -147,10 +174,40 @@ struct VideoPlayerSheet: View {
     }
 
     private func configurePlayer() {
+        holdRecognitionTask?.cancel()
+        holdRecognitionTask = nil
+        isTouchActive = false
+        isPausedByHold = false
+        try? MediaAudioSession.activatePlayback()
+        player.isMuted = false
+        player.volume = 1
         let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 3
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+        player.automaticallyWaitsToMinimizeStalling = true
         player.replaceCurrentItem(with: item)
         player.seek(to: .zero)
         player.play()
+    }
+
+    private func updateHoldRecognition(for value: DragGesture.Value) {
+        guard allowsHoldToPause, mediaType == .video else { return }
+
+        isTouchActive = true
+        let movedTooFar = abs(value.translation.width) >= 12 || abs(value.translation.height) >= 12
+        if movedTooFar {
+            holdRecognitionTask?.cancel()
+            holdRecognitionTask = nil
+            return
+        }
+
+        guard holdRecognitionTask == nil, !isPausedByHold else { return }
+        holdRecognitionTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, isTouchActive else { return }
+            isPausedByHold = true
+            player.pause()
+        }
     }
 
     private func shouldDismiss(for value: DragGesture.Value) -> Bool {

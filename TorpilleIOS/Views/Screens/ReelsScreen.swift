@@ -8,6 +8,8 @@ struct ReelsScreen: View {
     @State private var playbackURL: URL?
     @State private var playbackReel: PublishedReel?
     @State private var playbackTitle: String?
+    @State private var reportingReel: PublishedReel?
+    @State private var blockingReel: PublishedReel?
 
     init(env: AppEnvironment, onBack: (() -> Void)? = nil) {
         _vm = StateObject(wrappedValue: ReelsViewModel(repo: env.communityRepository))
@@ -20,7 +22,7 @@ struct ReelsScreen: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let onBack {
                     Button(action: onBack) {
-                        CompactActionButton(title: "Retour", systemImage: "arrow.left.circle.fill", accent: .slate)
+                        CompactActionButton(title: languageService.phrase("Retour"), systemImage: "arrow.left.circle.fill", accent: .slate)
                     }
                     .buttonStyle(.plain)
                 }
@@ -54,7 +56,18 @@ struct ReelsScreen: View {
                                     Button(role: .destructive) {
                                         vm.removeFromMemories(reel)
                                     } label: {
-                                        Label("Retirer des Memories", systemImage: "trash")
+                                        Label(languageService.phrase("Retirer des Memories"), systemImage: "trash")
+                                    }
+                                } else if vm.canReport(reel) {
+                                    Button {
+                                        reportingReel = reel
+                                    } label: {
+                                        Label(languageService.phrase("Signaler"), systemImage: "exclamationmark.bubble.fill")
+                                    }
+                                    Button(role: .destructive) {
+                                        blockingReel = reel
+                                    } label: {
+                                        Label(languageService.phrase("Bloquer cet utilisateur"), systemImage: "person.crop.circle.badge.xmark")
                                     }
                                 }
                             }
@@ -63,24 +76,41 @@ struct ReelsScreen: View {
                                 Button(role: .destructive) {
                                     vm.removeFromMemories(reel)
                                 } label: {
-                                    Label("Retirer des Memories", systemImage: "trash")
+                                    Label(languageService.phrase("Retirer des Memories"), systemImage: "trash")
                                         .font(.footnote.weight(.semibold))
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.red)
+                            } else if vm.canReport(reel) {
+                                Button {
+                                    reportingReel = reel
+                                } label: {
+                                    Label(languageService.phrase("Signaler"), systemImage: "exclamationmark.bubble.fill")
+                                        .font(.footnote.weight(.semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.red)
+
+                                Button(role: .destructive) {
+                                    blockingReel = reel
+                                } label: {
+                                    Label(languageService.phrase("Bloquer cet utilisateur"), systemImage: "person.crop.circle.badge.xmark")
+                                        .font(.footnote.weight(.semibold))
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
 
                 if let infoMessage = vm.infoMessage {
-                    Text(infoMessage)
+                    Text(languageService.localizedRuntimeMessage(infoMessage))
                         .font(.footnote)
                         .foregroundStyle(.green)
                 }
 
                 if let error = vm.error {
-                    Text(error)
+                    Text(languageService.localizedRuntimeMessage(error))
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
@@ -89,6 +119,35 @@ struct ReelsScreen: View {
         }
         .background(Color(.systemBackground))
         .navigationTitle(languageService.text(.reelsTitle))
+        .sheet(item: $reportingReel) { reel in
+            ReportContentSheet(
+                title: languageService.phrase("Signaler ce contenu"),
+                reportedName: "@\(reel.authorPseudo)",
+                onCancel: { reportingReel = nil },
+                onSubmit: { reason, details in
+                    vm.report(reel, reason: reason, details: details)
+                    reportingReel = nil
+                }
+            )
+        }
+        .alert(languageService.phrase("Bloquer cet utilisateur ?"), isPresented: Binding(
+            get: { blockingReel != nil },
+            set: { if !$0 { blockingReel = nil } }
+        )) {
+            Button(languageService.phrase("Annuler"), role: .cancel) {
+                blockingReel = nil
+            }
+            Button(languageService.phrase("Bloquer"), role: .destructive) {
+                guard let reel = blockingReel else { return }
+                vm.blockAuthor(of: reel)
+                blockingReel = nil
+            }
+        } message: {
+            Text(languageService.phrase("Cet utilisateur sera masqué dans l'application. Pour le débloquer, va dans ton profil."))
+        }
+        .iosBackSwipe(enabled: onBack != nil) {
+            onBack?()
+        }
         .onAppear { vm.start() }
         .sheet(item: Binding(get: {
             playbackURL.map { PlaybackContainer(url: $0, mediaType: .video, title: playbackTitle, sender: nil, tagX: nil, tagY: nil) }
@@ -114,8 +173,13 @@ struct ReelsScreen: View {
                 }
             )
         }
-        .sheet(item: $vm.selectedPublicProfile) { profile in
-            PublicProfileSheet(profile: profile)
+        .navigationDestination(isPresented: Binding(
+            get: { vm.selectedPublicProfile != nil },
+            set: { if !$0 { vm.selectedPublicProfile = nil } }
+        )) {
+            if let profile = vm.selectedPublicProfile {
+                SharedPublicUserProfileView(profile: profile)
+            }
         }
     }
 
@@ -199,50 +263,6 @@ struct ReelsScreen: View {
         playbackTitle = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             vm.openPublicProfile(for: reel)
-        }
-    }
-}
-
-private struct PublicProfileSheet: View {
-    let profile: UserProfile
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 18) {
-                if let icon = profile.profileIcon,
-                   profile.photoUrl?.isEmpty != false,
-                   !icon.isEmpty {
-                    EmojiAvatarView(profileIcon: icon, size: 104)
-                } else {
-                    ProfileAvatarImageView(
-                        imageData: nil,
-                        photoURL: profile.photoUrl,
-                        fallbackSymbol: "person.fill",
-                        size: 104
-                    )
-                }
-
-                Text("@\(profile.pseudo)")
-                    .font(.title2.weight(.bold))
-
-                if !profile.communityIds.isEmpty {
-                    Text("\(profile.communityIds.count) communauté\(profile.communityIds.count > 1 ? "s" : "") partagée\(profile.communityIds.count > 1 ? "s" : "") ou rejointe\(profile.communityIds.count > 1 ? "s" : "")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .navigationTitle("Profil public")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
         }
     }
 }
