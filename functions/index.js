@@ -1,6 +1,8 @@
+const {isRankingActive, changedSettings} = require("./community-schedule");
+const {notificationMode, shouldNotify, pushPayload} = require("./push-policy");
 const admin = require("firebase-admin");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
-const {onDocumentCreated, onDocumentWritten} = require("firebase-functions/v2/firestore");
+const {onDocumentCreated, onDocumentWritten, onDocumentWrittenWithAuthContext} = require("firebase-functions/v2/firestore");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {defineSecret} = require("firebase-functions/params");
 const functionsV1 = require("firebase-functions/v1");
@@ -9,6 +11,17 @@ const nodemailer = require("nodemailer");
 admin.initializeApp();
 
 const db = admin.firestore();
+const invitationHandlers = require("./community-invitations").createInvitationHandlers(db, HttpsError);
+exports.getCommunityInvitationCode = onCall({region: "europe-west1"}, invitationHandlers.getCommunityInvitationCode);
+exports.resolveCommunityInvitationCode = onCall({region: "europe-west1"}, invitationHandlers.resolveCommunityInvitationCode);
+const contactHandlers = require("./contact-discovery").createContactHandlers(db, admin.auth(), HttpsError);
+for (const [name, handler] of Object.entries(contactHandlers)) {
+  exports[name] = onCall({region: "europe-west1", enforceAppCheck: true}, handler);
+}
+const settingsHandlers = require("./community-settings").createSettingsHandlers({db, admin, HttpsError});
+for (const [name, handler] of Object.entries(settingsHandlers)) {
+  exports[name] = onCall({region: "europe-west1"}, handler);
+}
 const storage = admin.storage();
 const IOS_BUNDLE_ID = process.env.IOS_BUNDLE_ID || "com.torpille.ios";
 const REPORT_OWNER_EMAIL = process.env.REPORT_OWNER_EMAIL || process.env.APP_OWNER_EMAIL || "torpille.app@gmail.com";
@@ -165,6 +178,15 @@ exports.createVideoTorpille = onCall({region: "europe-west1"}, async (request) =
     throw new HttpsError("invalid-argument", "Invalid torpille data.");
   }
 
+  if (!videoPath.startsWith(`communities/${communityId}/videos/`)) {
+    throw new HttpsError("invalid-argument", "Vidéo extérieure à la communauté.");
+  }
+  if (data.respondingTo) {
+    const bucket = admin.storage().bucket();
+    if (videoBucket && videoBucket !== bucket.name) throw new HttpsError("invalid-argument", "Stockage vidéo invalide.");
+    const [exists] = await bucket.file(videoPath).exists();
+    if (!exists) throw new HttpsError("failed-precondition", "Attends la fin de l’envoi de la vidéo.");
+  }
   const communityRef = db.collection("communities").doc(communityId);
   const senderMemberRef = communityRef.collection("members").doc(uid);
   const targetMemberRef = communityRef.collection("members").doc(taggedUid);
@@ -172,10 +194,12 @@ exports.createVideoTorpille = onCall({region: "europe-west1"}, async (request) =
       .collection("blockedUsers").doc(uid);
   const senderBlockedTargetRef = db.collection("users").doc(uid)
       .collection("blockedUsers").doc(taggedUid);
+  const torpilleRef = communityRef.collection("torpilles").doc();
+  return db.runTransaction(async (batch) => {
   const [communitySnapshot, senderSnapshot, targetSnapshot,
     targetBlockedSenderSnapshot, senderBlockedTargetSnapshot] = await Promise.all([
-    communityRef.get(), senderMemberRef.get(), targetMemberRef.get(),
-    targetBlockedSenderRef.get(), senderBlockedTargetRef.get(),
+    batch.get(communityRef), batch.get(senderMemberRef), batch.get(targetMemberRef),
+    batch.get(targetBlockedSenderRef), batch.get(senderBlockedTargetRef),
   ]);
 
   if (!communitySnapshot.exists || !senderSnapshot.exists || !targetSnapshot.exists) {
@@ -190,34 +214,69 @@ exports.createVideoTorpille = onCall({region: "europe-west1"}, async (request) =
   const deadlineAt = admin.firestore.Timestamp.fromMillis(
       createdAt.toMillis() + Math.max(1, responseTimeSeconds) * 1000,
   );
-  const torpilleRef = communityRef.collection("torpilles").doc();
   const messageRef = communityRef.collection("messages").doc(torpilleRef.id);
   const tagX = typeof data.tagX === "number" ? data.tagX : 0.5;
   const tagY = typeof data.tagY === "number" ? data.tagY : 0.2;
 
   const media = {videoBucket: videoBucket || null, videoPath};
   if (videoUrl) media.videoUrl = videoUrl;
-  const batch = db.batch();
+  const replyingTo = typeof data.respondingTo === "string" ? data.respondingTo : "";
+  const rankingActive = isRankingActive(communitySnapshot.data().rankingSchedule, createdAt.toDate());
+  if (!rankingActive && !replyingTo) throw new HttpsError("failed-precondition", "Les torpilles sont fermées à cet horaire. Tu peux seulement répondre à une torpille reçue.");
+  let recoveryXp = 0;
+  let previousRef = null;
+  if (replyingTo) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(replyingTo)) throw new HttpsError("invalid-argument", "Torpille invalide.");
+    previousRef = communityRef.collection("torpilles").doc(replyingTo);
+    const previous = await batch.get(previousRef);
+    if (!previous.exists || previous.data().toUid !== uid || previous.data().responded === true || previous.data().responseRequired === false) {
+      throw new HttpsError("failed-precondition", "Cette torpille ne peut plus recevoir de réponse.");
+    }
+    if (previous.data().targetMembershipCreatedAt && !senderSnapshot.createTime.isEqual(previous.data().targetMembershipCreatedAt)) {
+      throw new HttpsError("failed-precondition", "Cette torpille appartient à une ancienne adhésion.");
+    }
+    const late = previous.data().deadlineAt.toMillis() <= createdAt.toMillis();
+    if (rankingActive && late && previous.data().eliminationMode === true && communitySnapshot.data().eliminationMode === true) {
+      throw new HttpsError("deadline-exceeded", "Délai dépassé : tu vas être expulsé de cette communauté.");
+    }
+    recoveryXp = rankingActive && late ? 5 : 0;
+  } else if (communitySnapshot.data().eliminationMode === true && senderSnapshot.data().pendingTorpilleId) {
+    throw new HttpsError("failed-precondition", "Réponds à ta torpille en cours avant d’en envoyer une autre.");
+  }
+  const eliminationMode = rankingActive && communitySnapshot.data().eliminationMode === true;
+  if (previousRef) {
+    batch.update(previousRef, {responded: true, respondedAt: createdAt, nextToUid: taggedUid});
+    batch.update(senderMemberRef, {
+      ...(senderSnapshot.data().pendingTorpilleId === replyingTo ? {
+        pendingTorpilleId: admin.firestore.FieldValue.delete(),
+        pendingDeadlineAt: admin.firestore.FieldValue.delete(), pendingFromPseudo: admin.firestore.FieldValue.delete(),
+      } : {}), lastRespondedAt: createdAt});
+  }
+  if (eliminationMode) batch.set(db.collection("communityEliminationQueue").doc(torpilleRef.id), {
+    communityId, torpilleId: torpilleRef.id, deadlineAt,
+  });
   batch.set(torpilleRef, {
     id: torpilleRef.id, fromUid: uid, fromPseudo: senderPseudo, toUid: taggedUid,
     communityId, ...media, taggedPseudo, tagX, tagY, createdAt, deadlineAt,
-    responded: false, isPublished: false, moderationStatus: "visible", reportCount: 0,
+    eliminationMode, targetMembershipCreatedAt: targetSnapshot.createTime,
+    responseRequired: rankingActive, responded: !rankingActive, isPublished: false, moderationStatus: "visible", reportCount: 0,
   });
   batch.set(messageRef, {
     id: torpilleRef.id, type: "video", senderUid: uid, senderPseudo,
     ...media, taggedUid, taggedPseudo, tagX, tagY, torpilleId: torpilleRef.id,
+    responseRequired: rankingActive,
     createdAt, moderationStatus: "visible", reportCount: 0,
   });
-  batch.set(targetMemberRef, {
+  if (rankingActive) batch.set(targetMemberRef, {
     pendingTorpilleId: torpilleRef.id, pendingDeadlineAt: deadlineAt,
     pendingFromPseudo: senderPseudo, lastTorpilledAt: createdAt,
   }, {merge: true});
   batch.set(senderMemberRef, {
     uid, pseudo: senderPseudo, lastTorpilleSentAt: createdAt,
-    xpInCommunity: admin.firestore.FieldValue.increment(20),
+    ...(rankingActive ? {xpInCommunity: admin.firestore.FieldValue.increment(20 + recoveryXp)} : {}),
   }, {merge: true});
-  await batch.commit();
   return {torpilleId: torpilleRef.id, messageId: messageRef.id};
+  });
 });
 
 function asInt64(value) {
@@ -340,6 +399,8 @@ exports.cleanupProfileImagesOnAuthDelete = functionsV1
     .auth.user()
     .onDelete(async (user) => {
       const userRef = db.collection("users").doc(user.uid);
+      await db.collection("contactDiscovery").doc(user.uid).delete();
+      await db.collection("contactDiscoveryLimits").doc(user.uid).delete();
       const snapshot = await userRef.get();
       const photoUrl = snapshot.exists && typeof snapshot.data().photoUrl === "string" ?
         snapshot.data().photoUrl : "";
@@ -550,14 +611,11 @@ async function getNotificationPreferenceMode(uid, communityId) {
     .get();
 
   const mode = snapshot.data() && snapshot.data().mode;
-  return typeof mode === "string" ? mode : "mentionsOnly";
+  return notificationMode(mode);
 }
 
 function shouldNotifyForPreference(mode, isExplicitlyIdentified) {
-  if (mode === "all") {
-    return true;
-  }
-  return mode === "mentionsOnly" && isExplicitlyIdentified;
+  return shouldNotify(mode, isExplicitlyIdentified);
 }
 
 function torpilleActionBody(fromPseudo, toPseudo) {
@@ -620,36 +678,15 @@ async function sendPushToUser(uid, {title, body, data}) {
     return {successCount: 0, failureCount: 0};
   }
 
-  const response = await admin.messaging().sendEachForMulticast({
-    tokens,
-    notification: {
-      title,
-      body,
-    },
-    data: Object.fromEntries(
-      Object.entries(data || {}).map(([key, value]) => [key, String(value)])
-    ),
-    apns: {
-      headers: {
-        "apns-push-type": "alert",
-        "apns-priority": "10",
-        "apns-topic": IOS_BUNDLE_ID,
-      },
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-        },
-      },
-    },
-  });
+  const response = await admin.messaging().sendEachForMulticast(
+      pushPayload(tokens, {title, body, data}, IOS_BUNDLE_ID)
+  );
 
   const invalidTokens = [];
   response.responses.forEach((result, index) => {
     if (!result.success && result.error) {
       console.error("push send failure", {
         uid,
-        token: tokens[index],
         code: result.error.code || "",
         message: result.error.message || "",
       });
@@ -1039,6 +1076,7 @@ exports.notifyOverdueModerationReports = onSchedule(
     {
       region: "europe-west1",
       schedule: "every 15 minutes",
+      maxInstances: 1,
       timeZone: "Europe/Brussels",
     },
     async () => {
@@ -1321,6 +1359,8 @@ exports.deleteMyAccount = onCall({region: "europe-west1", timeoutSeconds: 540, m
       await admin.auth().deleteUser(uid);
     }
     authDeleted = true;
+    await db.collection("contactDiscovery").doc(uid).delete();
+    await db.collection("contactDiscoveryLimits").doc(uid).delete();
 
     step = "owned-communities";
     const ownedCommunitiesSnapshot = await db
@@ -1429,15 +1469,11 @@ exports.notifyOnTorpilleCreated = onDocumentCreated(
       const senderPseudo = typeof torpille.fromPseudo === "string" ? torpille.fromPseudo.trim() : "";
       const senderLabel = senderPseudo ? `@${senderPseudo}` : "Un utilisateur";
       const remainingTime = remainingTorpilleTimeText(torpille.deadlineAt);
-      const body = `${senderLabel} t'a torpillé. Il te reste ${remainingTime} pour répondre.`;
-      const mode = await getNotificationPreferenceMode(toUid, communityId);
-      if (!shouldNotifyForPreference(mode, true)) {
-        console.log("notifyOnTorpilleCreated skipped by preference", {communityId, toUid, mode});
-        return;
-      }
+      const body = torpille.responseRequired === false ? `${senderLabel} a répondu hors horaires. Aucune réponse ni pénalité pour toi.` : `${senderLabel} t'a torpillé. Il te reste ${remainingTime} pour répondre.`;
+      // A direct torpille always alerts its recipient, even if discussion alerts are muted.
 
       const result = await sendPushToUser(toUid, {
-        title: `Torpille reçue • ${remainingTime}`,
+        title: torpille.responseRequired === false ? "Réponse hors horaires" : `Torpille reçue • ${remainingTime}`,
         body,
         data: {
           destination: "communityDiscussion",
@@ -1631,7 +1667,7 @@ exports.notifyOnCommunityJoinRequestResolved = onDocumentWritten(
 );
 
 exports.remindOverdueCommunityJoinRequests = onSchedule(
-    {region: "europe-west1", schedule: "every 60 minutes", timeZone: "Europe/Brussels", secrets: [SMTP_PASSWORD]},
+    {region: "europe-west1", schedule: "every 60 minutes", maxInstances: 1, timeZone: "Europe/Brussels", secrets: [SMTP_PASSWORD]},
     async () => {
       const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
       const snapshot = await db.collection("communityJoinRequests")
@@ -1740,7 +1776,7 @@ exports.notifyOnMessageCreated = onDocumentCreated(
     },
     async (event) => {
       const message = event.data && event.data.data();
-      if (!message) {
+      if (!message || message.type === "system") {
         return;
       }
 
@@ -1857,6 +1893,7 @@ exports.cleanupExpiredCommunityContent = onSchedule(
     {
       region: "europe-west1",
       schedule: "every 24 hours",
+      maxInstances: 1,
       timeZone: "Europe/Brussels",
     },
     async () => {
@@ -2038,3 +2075,34 @@ exports.onReportCreated = onDocumentCreated(
       }, {merge: true});
     }
 );
+
+
+const lifecycle = require("./community-lifecycle").createLifecycle({db, admin, HttpsError});
+exports.leaveCommunity = onCall({region: "europe-west1"}, lifecycle.leave);
+exports.recordCommunityMembershipEvent = onDocumentWrittenWithAuthContext({
+  region: "europe-west1", document: "communities/{communityId}/members/{memberId}", retry: true,
+}, lifecycle.membershipChanged);
+exports.processCommunityEliminations = onSchedule({
+  region: "europe-west1", schedule: "every 1 minutes", maxInstances: 1, timeZone: "Etc/UTC", timeoutSeconds: 540,
+}, lifecycle.sweep);
+
+// Deterministic message ID keeps the in-app notice unique across trigger retries.
+exports.notifyOnCommunitySettingsChanged = onDocumentWritten({
+  region: "europe-west1", document: "communities/{communityId}", retry: true,
+}, async event => {
+  if (!event.data?.before.exists || !event.data?.after.exists) return;
+  const before = event.data.before.data(), after = event.data.after.data();
+  const changes = changedSettings(before, after);
+  if (!changes.length) return;
+  const ref = event.data.after.ref;
+  const id = `settings-${require("node:crypto").createHash("sha256").update(event.id).digest("hex")}`;
+  const body = `Paramètres modifiés : ${changes.join(", ")}. Consulte les informations de la communauté.`;
+  await ref.collection("messages").doc(id).set({id, type: "system", systemEvent: "settingsChanged",
+    senderUid: "__system__", senderPseudo: "", text: body,
+    createdAt: admin.firestore.Timestamp.fromDate(new Date(event.time)), moderationStatus: "visible", reportCount: 0});
+  const members = await ref.collection("members").get();
+  for (const member of members.docs) {
+    await sendPushToUser(member.id, {title: after.name || "Paramètres de la communauté", body,
+      data: {destination: "communityDiscussion", communityId: event.params.communityId, type: "communitySettingsChanged"}});
+  }
+});

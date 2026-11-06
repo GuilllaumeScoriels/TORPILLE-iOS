@@ -89,3 +89,7 @@ firebase deploy --only hosting
 - Android : https://torpille-android-38783.web.app/ — page de téléchargement de l’APK de test.
 
 La page d’invitation conserve `cid` et la langue dans le lien Android. La page Android permet de revenir à cette même invitation après l’installation. Les liens d’invitation existants et nouveaux utilisent la même page publiée.
+
+## Version Android et configuration locale
+
+Les sources Android sont disponibles dans [APK_TORPILLE](https://github.com/GuilllaumeScoriels/APK_TORPILLE). Après clonage, ajouter votre propre `TorpilleIOS/Resources/GoogleService-Info.plist` depuis Firebase. Les fichiers de signature et configurations locales sont exclus de la version publiée.

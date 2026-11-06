@@ -9,6 +9,7 @@
  */
 
 import SwiftUI
+import FirebaseAuth
 
 struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -40,7 +41,7 @@ struct AppRootView: View {
                         .task { await viewModel.bootstrap() }
                 case .auth:
                     AuthScreen(onSignedIn: {
-                        Task { await viewModel.resumePendingJoinIfPossible() }
+                        try await viewModel.finishAuthentication()
                     }, onSignedUp: {
                         viewModel.route = .profile
                     }, env: viewModel.env)
@@ -79,7 +80,7 @@ struct AppRootView: View {
                 case .community(let communityId):
                     interactiveCommunityRoute(communityId: communityId)
                 case .communityInfo(let communityId):
-                    CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) })
+                    CommunityInfoScreen(env: viewModel.env, communityId: communityId, onBack: { viewModel.route = .community(communityId) }, onLeft: { viewModel.route = .home })
                 case .globalLeaderboard:
                     GlobalLeaderboardScreen(env: viewModel.env, onBack: { viewModel.route = .home })
                 case .notificationCenter:
@@ -125,10 +126,15 @@ struct AppRootView: View {
             }
         }
         .onOpenURL { url in
-            viewModel.handleIncomingURL(url)
+            if !Auth.auth().canHandle(url) { viewModel.handleIncomingURL(url) }
         }
         .task {
             await launchLocationSyncViewModel.syncOnAppOpenIfNeeded()
+        }
+        .task(id: scenePhase) {
+            // Present the system permission dialog only once the scene is visible.
+            guard scenePhase == .active else { return }
+            await notificationService.requestAuthorizationIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }

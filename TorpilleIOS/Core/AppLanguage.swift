@@ -763,17 +763,17 @@ final class AppLanguageService: ObservableObject {
     func localizedResetPasswordInfo(for email: String) -> String {
         switch effectiveLanguage {
         case .system, .french:
-            return "Un email de réinitialisation a été envoyé à \(email)."
+            return "Si un compte correspond à \(email), un email de réinitialisation lui sera envoyé. Vérifie aussi les courriers indésirables."
         case .english:
-            return "A password reset email has been sent to \(email)."
+            return "If an account matches \(email), a password reset email will be sent. Check your spam folder too."
         case .spanish:
-            return "Se ha enviado un correo de restablecimiento a \(email)."
+            return "Si existe una cuenta para \(email), recibirás un correo para restablecer la contraseña. Revisa también el correo no deseado."
         case .german:
-            return "Eine E-Mail zum Zurücksetzen des Passworts wurde an \(email) gesendet."
+            return "Falls ein Konto für \(email) existiert, wird eine E-Mail zum Zurücksetzen gesendet. Prüfe auch den Spamordner."
         case .italian:
-            return "Un'email per reimpostare la password è stata inviata a \(email)."
+            return "Se esiste un account per \(email), riceverai un'email per reimpostare la password. Controlla anche lo spam."
         case .portuguese:
-            return "Um email de redefinição de senha foi enviado para \(email)."
+            return "Se existir uma conta para \(email), será enviado um email para redefinir a senha. Verifica também o spam."
         }
     }
 
@@ -1007,6 +1007,18 @@ final class AppLanguageService: ObservableObject {
                 "J’accepte la politique de confidentialité": "I accept the privacy policy",
                 "Les deux acceptations sont obligatoires pour continuer.": "Both agreements are required to continue.",
                 "Revoir mes acceptations": "Review my agreements",
+                "Mot de passe oublié ?": "Forgot password?",
+                "Entre ton email et ton mot de passe.": "Enter your email and password.",
+                "Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.": "Choose your email and a password of at least 6 characters. You will receive an email to confirm your address.",
+                "Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.": "Enter your account email. You will receive a link to choose a new password.",
+                "Créer mon compte": "Create my account",
+                "Envoyer le lien": "Send the link",
+                "Envoi impossible": "Couldn’t send",
+                "Retirer ma réaction": "Remove my reaction",
+                "Afficher le mot de passe": "Show password",
+                "Masquer le mot de passe": "Hide password",
+                "Au moins 6 caractères.": "At least 6 characters.",
+                "Création du compte impossible": "Couldn’t create the account",
                 "Lu et accepté": "Read and accepted",
                 "Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.": "Read and accept the EULA rules and privacy policy before continuing.",
                 "Conditions obligatoires avant connexion ou inscription": "Required terms before signing in or registering",
@@ -1179,6 +1191,14 @@ final class AppLanguageService: ObservableObject {
                 "Ouvre le profil public de cet ami.": "Open this friend's public profile.",
                 "Le pseudo, la photo de profil et le nombre d'amis sont publics. La langue et le classement ne s'affichent ici que si l'utilisateur les a rendus visibles.": "The username, profile photo and friend count are public. Language and ranking only appear here if the user made them visible.",
                 "Carte des torpilleurs": "Torpilleurs map",
+                "Connexion impossible": "Unable to sign in",
+                "La connexion prend trop de temps. Vérifie ta connexion Internet puis réessaie.": "Sign-in is taking too long. Check your Internet connection and try again.",
+                "Partager ma position maintenant": "Share my location now",
+                "Partager ma position ?": "Share my location?",
+                "Retirer ma position": "Remove my location",
+                "Ta position est partagée uniquement après un pointage manuel, pendant 30 minutes. Aucun partage automatique.": "Your location is shared only after a manual check-in, for 30 minutes. No automatic sharing.",
+                "Les membres de tes communautés pourront voir cette position sur la carte pendant 30 minutes. Ce pointage est unique : aucun renouvellement automatique. Tu peux refuser ou retirer ta position à tout moment.": "Members of your communities will see this location on the map for 30 minutes. This is a single check-in, with no automatic renewal. You can decline or remove your location at any time.",
+                "La carte montre les pointages manuels des membres de tes communautés pendant 30 minutes. Pour actualiser ta position, confirme un nouveau pointage.": "The map shows community members' manual check-ins for 30 minutes. To update your location, confirm a new check-in.",
                 "Toutes": "All",
                 "Tu n'appartiens encore à aucune communauté.": "You do not belong to any community yet.",
                 "Aucun torpilleur géolocalisé": "No geolocated torpilleur",
@@ -1272,6 +1292,19 @@ final class AppLanguageService: ObservableObject {
                 "J’accepte la politique de confidentialité": "Acepto la política de privacidad",
                 "Les deux acceptations sont obligatoires pour continuer.": "Debes aceptar ambos documentos para continuar.",
                 "Revoir mes acceptations": "Revisar mis aceptaciones",
+                "Mot de passe oublié ?": "¿Olvidaste tu contraseña?",
+                "Entre ton email et ton mot de passe.": "Introduce tu email y tu contraseña.",
+                "Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.": "Elige tu email y una contraseña de al menos 6 caracteres. Recibirás un email para confirmar tu dirección.",
+                "Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.": "Introduce el email de tu cuenta. Recibirás un enlace para elegir una nueva contraseña.",
+                "Créer mon compte": "Crear mi cuenta",
+                "Envoyer le lien": "Enviar el enlace",
+                "Envoi impossible": "No se pudo enviar",
+                "Connexion impossible": "No se pudo iniciar sesión",
+                "Retirer ma réaction": "Quitar mi reacción",
+                "Afficher le mot de passe": "Mostrar contraseña",
+                "Masquer le mot de passe": "Ocultar contraseña",
+                "Au moins 6 caractères.": "Al menos 6 caracteres.",
+                "Création du compte impossible": "No se pudo crear la cuenta",
                 "Lu et accepté": "Leído y aceptado",
                 "Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.": "Lee y acepta las reglas EULA y la política de privacidad antes de continuar.",
                 "Conditions obligatoires avant connexion ou inscription": "Condiciones obligatorias antes de iniciar sesión o registrarte",
@@ -1482,6 +1515,20 @@ final class AppLanguageService: ObservableObject {
                 "J’accepte la politique de confidentialité": "Ich akzeptiere die Datenschutzerklärung",
                 "Les deux acceptations sont obligatoires pour continuer.": "Beide Zustimmungen sind erforderlich, um fortzufahren.",
                 "Revoir mes acceptations": "Meine Zustimmungen prüfen",
+                "Mot de passe oublié ?": "Passwort vergessen?",
+                "Entre ton email et ton mot de passe.": "Gib deine E-Mail-Adresse und dein Passwort ein.",
+                "Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.": "Wähle deine E-Mail-Adresse und ein Passwort mit mindestens 6 Zeichen. Du erhältst eine E-Mail, um deine Adresse zu bestätigen.",
+                "Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.": "Gib die E-Mail-Adresse deines Kontos ein. Du erhältst einen Link, um ein neues Passwort festzulegen.",
+                "Créer mon compte": "Mein Konto erstellen",
+                "Envoyer le lien": "Link senden",
+                "Envoi impossible": "Senden nicht möglich",
+                "Connexion impossible": "Anmeldung nicht möglich",
+                "Retirer ma réaction": "Meine Reaktion entfernen",
+                "Afficher le mot de passe": "Passwort anzeigen",
+                "Masquer le mot de passe": "Passwort verbergen",
+                "Au moins 6 caractères.": "Mindestens 6 Zeichen.",
+                "Retour": "Zurück",
+                "Création du compte impossible": "Konto konnte nicht erstellt werden",
                 "Lu et accepté": "Gelesen und akzeptiert",
                 "Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.": "Lies und akzeptiere die EULA-Regeln und die Datenschutzerklärung, bevor du fortfährst.",
                 "Politique de confidentialité": "Datenschutzerklärung",
@@ -1532,6 +1579,20 @@ final class AppLanguageService: ObservableObject {
                 "J’accepte la politique de confidentialité": "Accetto l’informativa sulla privacy",
                 "Les deux acceptations sont obligatoires pour continuer.": "Entrambe le accettazioni sono obbligatorie per continuare.",
                 "Revoir mes acceptations": "Rivedi le mie accettazioni",
+                "Mot de passe oublié ?": "Password dimenticata?",
+                "Entre ton email et ton mot de passe.": "Inserisci la tua email e la tua password.",
+                "Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.": "Scegli la tua email e una password di almeno 6 caratteri. Riceverai un’email per confermare il tuo indirizzo.",
+                "Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.": "Inserisci l’email del tuo account. Riceverai un link per scegliere una nuova password.",
+                "Créer mon compte": "Crea il mio account",
+                "Envoyer le lien": "Invia il link",
+                "Envoi impossible": "Invio non riuscito",
+                "Connexion impossible": "Accesso non riuscito",
+                "Retirer ma réaction": "Rimuovi la mia reazione",
+                "Afficher le mot de passe": "Mostra password",
+                "Masquer le mot de passe": "Nascondi password",
+                "Au moins 6 caractères.": "Almeno 6 caratteri.",
+                "Retour": "Indietro",
+                "Création du compte impossible": "Impossibile creare l’account",
                 "Lu et accepté": "Letto e accettato",
                 "Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.": "Leggi e accetta le regole EULA e l’informativa sulla privacy prima di continuare.",
                 "Politique de confidentialité": "Informativa sulla privacy",
@@ -1582,6 +1643,20 @@ final class AppLanguageService: ObservableObject {
                 "J’accepte la politique de confidentialité": "Aceito a política de privacidade",
                 "Les deux acceptations sont obligatoires pour continuer.": "É necessário aceitar os dois documentos para continuar.",
                 "Revoir mes acceptations": "Rever minhas aceitações",
+                "Mot de passe oublié ?": "Esqueceu a senha?",
+                "Entre ton email et ton mot de passe.": "Digite seu email e sua senha.",
+                "Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.": "Escolha seu email e uma senha com pelo menos 6 caracteres. Você receberá um email para confirmar seu endereço.",
+                "Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.": "Digite o email da sua conta. Você receberá um link para escolher uma nova senha.",
+                "Créer mon compte": "Criar minha conta",
+                "Envoyer le lien": "Enviar o link",
+                "Envoi impossible": "Não foi possível enviar",
+                "Connexion impossible": "Não foi possível entrar",
+                "Retirer ma réaction": "Remover minha reação",
+                "Afficher le mot de passe": "Mostrar senha",
+                "Masquer le mot de passe": "Ocultar senha",
+                "Au moins 6 caractères.": "Pelo menos 6 caracteres.",
+                "Retour": "Voltar",
+                "Création du compte impossible": "Não foi possível criar a conta",
                 "Lu et accepté": "Lido e aceito",
                 "Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.": "Leia e aceite as regras EULA e a política de privacidade antes de continuar.",
                 "Politique de confidentialité": "Política de privacidade",

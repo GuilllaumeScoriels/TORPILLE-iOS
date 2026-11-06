@@ -75,6 +75,12 @@ private func debugDescribe(_ error: Error) -> String {
         print("userInfo =", nsError.userInfo)
     }
 
+    private final class ClosureListenerRegistration: NSObject, ListenerRegistration {
+        private var cleanup: (() -> Void)?
+        init(_ cleanup: @escaping () -> Void) { self.cleanup = cleanup }
+        func remove() { cleanup?(); cleanup = nil }
+    }
+
     private final class CompositeListenerRegistration: NSObject, ListenerRegistration {
         private var registrations: [ListenerRegistration]
 
@@ -174,7 +180,19 @@ private enum BasicContentFilter {
     }
 }
 
-final class AuthRepository {
+protocol AuthSessionManaging {
+    var currentUID: String { get }
+    var isCurrentUserEmailVerified: Bool { get }
+    func signIn(email: String, password: String) async throws
+    func signUp(email: String, password: String) async throws
+    func reloadCurrentUser() async throws
+    func sendEmailVerification() async throws
+    func sendPasswordReset(email: String) async throws
+    func setLanguageCode(_ languageCode: String?)
+    func signOut() throws
+}
+
+final class AuthRepository: AuthSessionManaging {
     private let auth = Auth.auth()
 
     var currentUID: String { auth.currentUser?.uid ?? "" }
@@ -737,11 +755,34 @@ final class UserRepository {
             throw TorpilleError.notAuthenticated
         }
 
-        try await users.document(resolvedUID).setData([
-            "fcmToken": cleanToken,
-            "fcmTokens": FieldValue.arrayUnion([cleanToken]),
-            "updatedAt": Timestamp(date: Date())
-        ], merge: true)
+        guard auth.currentUser?.uid == resolvedUID else { throw TorpilleError.notAuthenticated }
+        let userRef = users.document(resolvedUID)
+        _ = try await db.runTransaction { transaction, errorPointer in
+            do {
+                let snapshot = try transaction.getDocument(userRef)
+                let data = snapshot.data() ?? [:]
+                var tokens = CommunityMembershipStore.normalizedIDs(from: data["fcmTokens"])
+                if let primary = data["fcmToken"] as? String, !tokens.contains(primary) {
+                    tokens.append(primary)
+                }
+                // Firestore allows at most ten devices. Refresh this device at the
+                // end and retire the oldest stored tokens instead of rejecting it.
+                tokens.removeAll { $0 == cleanToken }
+                tokens.append(cleanToken)
+                let boundedTokens = Array(tokens.suffix(10))
+                PushRegistrationDiagnostics.log("Saving current device; stored token slots=\(boundedTokens.count)")
+                transaction.setData([
+                    "uid": resolvedUID,
+                    "fcmToken": cleanToken,
+                    "fcmTokens": boundedTokens,
+                    "updatedAt": Timestamp(date: Date())
+                ], forDocument: userRef, merge: true)
+                return nil
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+        }
     }
 
     func unregisterFCMToken(_ token: String, for uid: String? = nil) async throws {
@@ -1033,6 +1074,22 @@ final class CommunityRepository {
     private var users: CollectionReference { db.collection("users") }
     private var reels: CollectionReference { db.collection("reels") }
     private var reports: CollectionReference { db.collection("reports") }
+
+    func invitationCode(communityId: String) async throws -> String {
+        let result = try await functions.httpsCallable("getCommunityInvitationCode").call(["communityId": communityId])
+        guard let data = result.data as? [String: Any], let code = data["code"] as? String else {
+            throw TorpilleError.missingData("Code d’invitation indisponible.")
+        }
+        return code
+    }
+
+    func resolveInvitationCode(_ code: String) async throws -> String {
+        let result = try await functions.httpsCallable("resolveCommunityInvitationCode").call(["code": code])
+        guard let data = result.data as? [String: Any], let communityId = data["communityId"] as? String else {
+            throw TorpilleError.missingData("Code d’invitation introuvable.")
+        }
+        return communityId
+    }
 
     private func normalizedCommunityIds(_ communityIds: [String]) -> [String] {
         CommunityMembershipStore.normalizedIDs(from: communityIds)
@@ -1441,6 +1498,11 @@ final class CommunityRepository {
             name: (data["name"] as? String) ?? "",
             isPublic: boolValue(from: data["isPublic"], default: true),
             adminUid: (data["adminUid"] as? String) ?? "",
+            rankingSchedule: (data["rankingSchedule"] as? [String: Any]).flatMap { raw in
+                guard let encoded = try? JSONSerialization.data(withJSONObject: raw) else { return nil }
+                return try? JSONDecoder().decode(RankingSchedule.self, from: encoded)
+            },
+            eliminationMode: boolValue(from: data["eliminationMode"]),
             responseTimeSeconds: int64Value(from: data["responseTimeSeconds"]),
             createdAt: timestampValue(from: data["createdAt"])
         )
@@ -1487,6 +1549,7 @@ final class CommunityRepository {
         return Message(
             documentId: snapshot.documentID,
             id: (data["id"] as? String) ?? snapshot.documentID,
+            systemEvent: data["systemEvent"] as? String,
             type: type,
             senderUid: senderUid,
             senderPseudo: (data["senderPseudo"] as? String) ?? "",
@@ -1511,7 +1574,8 @@ final class CommunityRepository {
             savedByUid: stringValue(from: data["savedByUid"]),
             savedByPseudo: stringValue(from: data["savedByPseudo"]),
             moderationStatus: stringValue(from: data["moderationStatus"]),
-            reportCount: int64Value(from: data["reportCount"])
+            reportCount: int64Value(from: data["reportCount"]),
+            reactions: (data["reactions"] as? [String: Any])?.compactMapValues { $0 as? String }
         )
     }
 
@@ -1525,6 +1589,7 @@ final class CommunityRepository {
         }
 
         return Torpille(
+            responseRequired: data["responseRequired"] as? Bool,
             documentId: snapshot.documentID,
             id: stringValue(from: data["id"]) ?? snapshot.documentID,
             fromUid: fromUid,
@@ -1655,51 +1720,21 @@ final class CommunityRepository {
 
     @discardableResult
     private func applyExpiredPenaltyIfNeeded(communityId: String, memberUid: String) async throws -> Bool {
-        let memberRef = communities.document(communityId).collection("members").document(memberUid)
-        let transactionResult = try await db.runTransaction { transaction, errorPointer in
-            do {
-                let memberSnapshot = try transaction.getDocument(memberRef)
-                guard memberSnapshot.exists else { return false }
-
-                let memberData = memberSnapshot.data() ?? [:]
-                guard let pendingTorpilleId = memberData["pendingTorpilleId"] as? String,
-                      !pendingTorpilleId.isEmpty,
-                      let pendingDeadlineAt = memberData["pendingDeadlineAt"] as? Timestamp else {
-                    return false
-                }
-
-                guard pendingDeadlineAt.dateValue() <= Date() else {
-                    return false
-                }
-
-                let torpRef = self.communities.document(communityId).collection("torpilles").document(pendingTorpilleId)
-                let torpSnapshot = try transaction.getDocument(torpRef)
-                guard torpSnapshot.exists else { return false }
-
-                let torpData = torpSnapshot.data() ?? [:]
-                if (torpData["responded"] as? Bool) == true { return false }
-                if (torpData["penaltyApplied"] as? Bool) == true { return false }
-
-                transaction.updateData([
-                    "penaltyApplied": true
-                ], forDocument: torpRef)
-
-                transaction.updateData([
-                    "xpInCommunity": FieldValue.increment(Int64(-10))
-                ], forDocument: memberRef)
-
-                return true
-            } catch {
-                errorPointer?.pointee = error as NSError
-                return false
-            }
+        guard memberUid == auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        // Best effort: the penalty is bookkeeping only. createVideoTorpille already
+        // handles late answers server-side, so a failure here (function not deployed,
+        // network hiccup…) must never block answering a torpille or syncing XP.
+        do {
+            let result = try await functions.httpsCallable("applyExpiredTorpillePenalty").call(["communityId": communityId])
+            return (result.data as? [String: Any])?["applied"] as? Bool ?? false
+        } catch {
+            logDiagnostic(error)
+            return false
         }
-
-        return (transactionResult as? Bool) ?? false
     }
 
     func inviteLink(for communityId: String, languageCode: String = "fr") -> String {
-        "https://torpille-38783.web.app/join.html?cid=\(communityId)&lang=\(languageCode)"
+        "https://torpille-38783.web.app/join?cid=\(communityId)&lang=\(languageCode)"
     }
 
     func getCommunityOrThrow(_ communityId: String) async throws -> Community {
@@ -1720,7 +1755,8 @@ final class CommunityRepository {
         do {
             try await refreshCurrentAuthToken()
         } catch {
-            throw TorpilleError.missingData(OperationDiagnostics.message(for: .refreshToken, error: error))
+            logDiagnostic(error)
+            throw error
         }
         let doc = communities.document()
         let community = Community(
@@ -1734,7 +1770,8 @@ final class CommunityRepository {
         do {
             try doc.setData(from: community)
         } catch {
-            throw TorpilleError.missingData(OperationDiagnostics.message(for: .createCommunityDocument, error: error))
+            logDiagnostic(error)
+            throw error
         }
 
         let memberPayload = memberPayload(
@@ -1747,7 +1784,8 @@ final class CommunityRepository {
         do {
             try await doc.collection("members").document(uid).setData(memberPayload)
         } catch {
-            throw TorpilleError.missingData(OperationDiagnostics.message(for: .createAdminMembership, error: error))
+            logDiagnostic(error)
+            throw error
         }
         do {
             try await appendCommunityIdToProfile(doc.documentID, for: uid)
@@ -1826,15 +1864,10 @@ final class CommunityRepository {
         ])
     }
 
-    func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64) async throws {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
-        let community = try await getCommunityOrThrow(communityId)
-        guard community.adminUid == uid else {
-            throw TorpilleError.missingData("Seul l'administrateur peut modifier la communauté.")
-        }
-        try await communities.document(communityId).updateData([
-            "isPublic": isPublic,
-            "responseTimeSeconds": responseTimeSeconds
+    func updateCommunitySettings(communityId: String, isPublic: Bool, responseTimeSeconds: Int64, eliminationMode: Bool, rankingSchedule: RankingSchedule = RankingSchedule()) async throws {
+        _ = try await functions.httpsCallable("updateCommunitySettings").call([
+            "communityId": communityId, "isPublic": isPublic, "eliminationMode": eliminationMode,
+            "responseTimeSeconds": responseTimeSeconds, "rankingSchedule": rankingSchedule.payload
         ])
     }
 
@@ -1909,53 +1942,81 @@ final class CommunityRepository {
             return nil
         }
 
-        var generation = 0
-        return db.collectionGroup("members")
-            .whereField("uid", isEqualTo: uid)
-            .addSnapshotListener { [weak self] snapshot, _ in
-            generation += 1
-            let currentGeneration = generation
-            guard let self else { return }
-            Task {
-                let storedIds = (try? await self.loadCanonicalCommunityIds(for: uid)) ?? []
-                let membershipIds = self.normalizedCommunityIds(
-                    snapshot?.documents.compactMap { $0.reference.parent.parent?.documentID } ?? []
-                )
-                let mergedIds = CommunityMembershipStore.mergedIDs(
-                    primary: storedIds,
-                    secondary: membershipIds
-                )
+        // Read both sources independently: legacy accounts can lack uid in member documents.
+        // Never repair stored membership IDs from an incomplete or denied read.
+        var profileIds: [String] = []
+        var membershipIds: [String] = []
+        var communityListeners: [String: ListenerRegistration] = [:]
+        var memberListeners: [String: ListenerRegistration] = [:]
+        var communityValues: [String: Community] = [:]
+        var memberValues: [String: Member] = [:]
+        var stopped = false
 
-                let resolved = await self.resolveCommunities(for: uid, communityIds: mergedIds) { values in
-                    guard currentGeneration == generation else { return }
-                    onPartial?(values)
+        func publish() {
+            guard !stopped else { return }
+            let values = communityValues.compactMap { id, community -> (Community, Member)? in
+                guard let member = memberValues[id] else { return nil }
+                return (community, member)
+            }.sorted { lhs, rhs in
+                let left = lhs.1.lastOpenedAt?.dateValue() ?? .distantPast
+                let right = rhs.1.lastOpenedAt?.dateValue() ?? .distantPast
+                if left != right { return left > right }
+                let leftCreated = lhs.0.createdAt?.dateValue() ?? .distantPast
+                let rightCreated = rhs.0.createdAt?.dateValue() ?? .distantPast
+                if leftCreated != rightCreated { return leftCreated > rightCreated }
+                return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
+            }.map(\.0)
+            onPartial?(values)
+            handler(values)
+        }
+
+        func reconcile() {
+            guard !stopped else { return }
+            let ids = Set(CommunityMembershipStore.mergedIDs(primary: profileIds, secondary: membershipIds))
+            for id in Array(communityListeners.keys) where !ids.contains(id) {
+                communityListeners.removeValue(forKey: id)?.remove()
+                memberListeners.removeValue(forKey: id)?.remove()
+                communityValues.removeValue(forKey: id)
+                memberValues.removeValue(forKey: id)
+            }
+            for id in ids where communityListeners[id] == nil {
+                let ref = self.communities.document(id)
+                communityListeners[id] = ref.addSnapshotListener { [weak self] snapshot, error in
+                    guard !stopped, communityListeners[id] != nil, error == nil, let snapshot else { return }
+                    communityValues[id] = snapshot.exists ? self?.decodeCommunity(from: snapshot) : nil
+                    publish()
                 }
-                guard currentGeneration == generation else { return }
-                handler(resolved.communities)
-
-                if mergedIds != storedIds {
-                    do {
-                        try await self.setProfileCommunityIds(mergedIds, for: uid)
-                    } catch {
-                        print("⚠️ CommunityRepository.observeCommunitiesForMe profile merge repair failure:", debugDescribe(error))
-                    }
-                }
-
-                if resolved.validIds != mergedIds {
-                    do {
-                        let repairedIds = resolved.validIds.isEmpty ? membershipIds : resolved.validIds
-                        try await self.setProfileCommunityIds(repairedIds, for: uid)
-                    } catch {
-                        print("⚠️ CommunityRepository.observeCommunitiesForMe profile self-heal failure:", debugDescribe(error))
-                    }
-                }
-
-                if resolved.communities.isEmpty && !mergedIds.isEmpty && !membershipIds.isEmpty {
-                    let fallbackResolved = await self.resolveCommunities(for: uid, communityIds: membershipIds)
-                    guard currentGeneration == generation else { return }
-                    handler(fallbackResolved.communities)
+                memberListeners[id] = ref.collection("members").document(uid).addSnapshotListener { [weak self] snapshot, error in
+                    guard !stopped, memberListeners[id] != nil, error == nil, let snapshot else { return }
+                    memberValues[id] = snapshot.exists ? self?.decodeMember(from: snapshot) : nil
+                    publish()
                 }
             }
+            publish()
+        }
+
+        let profileListener = users.document(uid).addSnapshotListener { snapshot, error in
+            guard !stopped, error == nil, let snapshot else { return }
+            profileIds = CommunityMembershipStore.normalizedIDs(from: snapshot.data()?["communityIds"])
+            reconcile()
+        }
+        let membershipListener = db.collectionGroup("members").whereField("uid", isEqualTo: uid)
+            .addSnapshotListener { snapshot, error in
+                guard !stopped, error == nil, let snapshot else { return }
+                membershipIds = snapshot.documents.compactMap {
+                    let parent = $0.reference.parent.parent
+                    return parent?.parent.collectionID == "communities" ? parent?.documentID : nil
+                }
+                reconcile()
+            }
+        return ClosureListenerRegistration {
+            stopped = true
+            profileListener.remove()
+            membershipListener.remove()
+            communityListeners.values.forEach { $0.remove() }
+            memberListeners.values.forEach { $0.remove() }
+            communityListeners.removeAll()
+            memberListeners.removeAll()
         }
     }
 
@@ -2438,6 +2499,8 @@ final class CommunityRepository {
 
         var message = try snapshot.data(as: Message.self)
         message.id = messageId
+        // Reactions stay on the live message; the saved copy keeps its content only.
+        message.reactions = nil
         message.savedAt = savedAt
         message.savedByUid = uid
         message.savedByPseudo = savedByPseudo
@@ -2450,6 +2513,19 @@ final class CommunityRepository {
         ], forDocument: messageRef, merge: true)
         try batch.setData(from: message, forDocument: savedMessageRef)
         try await batch.commit()
+    }
+
+    /// Sets (or with nil removes) the current user's emoji reaction on a message.
+    /// Rules only allow touching `reactions.<own uid>` with an allowed emoji.
+    func setReaction(communityId: String, messageId: String, emoji: String?) async throws {
+        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
+        if let emoji, !MessageReaction.allowed.contains(emoji) {
+            throw TorpilleError.missingData("Réaction indisponible.")
+        }
+        let messageRef = communities.document(communityId).collection("messages").document(messageId)
+        let field = FieldPath(["reactions", uid])
+        let value: Any = emoji ?? FieldValue.delete()
+        try await messageRef.updateData([field: value])
     }
 
     func sendText(communityId: String, senderPseudo: String, text: String) async throws {
@@ -2855,7 +2931,8 @@ final class CommunityRepository {
         taggedPseudo: String,
         publishToReels: Bool,
         tagX: Double,
-        tagY: Double
+        tagY: Double,
+        respondingTo: String = ""
     ) async throws {
         guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
 
@@ -2921,7 +2998,8 @@ final class CommunityRepository {
             "videoPath": uploaded.storagePath,
             "videoUrl": uploaded.downloadURL,
             "tagX": tagX,
-            "tagY": tagY
+            "tagY": tagY,
+            "respondingTo": respondingTo
         ])
         try? await recalculateXPForCurrentUser()
 
@@ -2939,65 +3017,14 @@ final class CommunityRepository {
         tagX: Double,
         tagY: Double
     ) async throws {
-        guard let uid = auth.currentUser?.uid else { throw TorpilleError.notAuthenticated }
         _ = try await applyExpiredPenaltyIfNeeded(communityId: communityId)
+        try await sendVideoTorpilleRaw(communityId: communityId, senderPseudo: senderPseudo,
+            localFileURL: localFileURL, taggedUid: nextTaggedUid, taggedPseudo: nextTaggedPseudo,
+            publishToReels: publishToReels, tagX: tagX, tagY: tagY, respondingTo: pendingTorpilleId)
+    }
 
-        let torpRef = communities.document(communityId).collection("torpilles").document(pendingTorpilleId)
-        let torpSnapshot = try await torpRef.getDocument()
-        guard torpSnapshot.exists else {
-            throw TorpilleError.missingData("Torpille introuvable")
-        }
-        guard let torp = decodeTorpille(from: torpSnapshot) else {
-            throw TorpilleError.missingData("Impossible de lire cette torpille.")
-        }
-        guard torp.toUid == uid else {
-            throw TorpilleError.missingData("Cette torpille ne t'est pas destinée")
-        }
-
-        print("📍 CommunityRepository.respondWithVideo")
-        print("🎥 response localFileURL =", localFileURL.path)
-        print("🎥 response file exists =", FileManager.default.fileExists(atPath: localFileURL.path))
-        let now = Timestamp(date: Date())
-        let isLateResponse = (torp.deadlineAt?.dateValue() ?? .distantFuture) < now.dateValue()
-        let recoveryXP: Int64 = isLateResponse ? 5 : 0
-
-        let batch = db.batch()
-        batch.updateData([
-            "responded": true,
-            "respondedAt": now,
-            "nextToUid": nextTaggedUid
-        ], forDocument: torpRef)
-        batch.updateData([
-            "pendingTorpilleId": FieldValue.delete(),
-            "pendingDeadlineAt": FieldValue.delete(),
-            "pendingFromPseudo": FieldValue.delete(),
-            "lastRespondedAt": now,
-            "xpInCommunity": FieldValue.increment(recoveryXP)
-        ], forDocument: communities.document(communityId).collection("members").document(uid))
-        do {
-            try await batch.commit()
-            print("✅ respondWithVideo pre-batch commit ok")
-            do {
-                try await recalculateXPForCurrentUser()
-            } catch {
-                print("⚠️ CommunityRepository.respondWithVideo recalculateXPForCurrentUser failure:", debugDescribe(error))
-            }
-        } catch {
-            debugLog("CommunityRepository.respondWithVideo pre-batch commit failed", error)
-            throw error
-        }
-
-        try await sendVideoTorpilleRaw(
-            communityId: communityId,
-            senderPseudo: senderPseudo,
-            localFileURL: localFileURL,
-            taggedUid: nextTaggedUid,
-            taggedPseudo: nextTaggedPseudo,
-            publishToReels: publishToReels,
-            tagX: tagX,
-            tagY: tagY
-        )
-
+    func leaveCommunity(communityId: String) async throws {
+        _ = try await functions.httpsCallable("leaveCommunity").call(["communityId": communityId])
     }
 
     func updateMyLocation(in communityIds: [String], latitude: Double, longitude: Double) async throws -> Bool {

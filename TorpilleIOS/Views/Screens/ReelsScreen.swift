@@ -252,7 +252,7 @@ struct ReelsScreen: View {
             playbackReel = reel
             playbackTitle = reel.taggedPseudo
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 

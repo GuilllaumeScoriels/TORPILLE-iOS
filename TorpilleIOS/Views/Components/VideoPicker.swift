@@ -109,6 +109,7 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
     private var shouldResumeAfterSwitch = false
     private var isFinishing = false
     private var captureState: CaptureState = .idle
+    private var hasRequestedPermissions = false
 
     private let onFinish: (URL) -> Void
     private let onCancel: () -> Void
@@ -159,9 +160,18 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
         super.viewDidLoad()
         view.backgroundColor = .black
         installControls()
+        recordButton.isEnabled = false
+        flipButton.isEnabled = false
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(switchCamera))
         doubleTap.numberOfTapsRequired = 2
         view.addGestureRecognizer(doubleTap)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Present permission errors only once the camera is on screen.
+        guard !hasRequestedPermissions else { return }
+        hasRequestedPermissions = true
         requestPermissionsAndConfigure()
     }
 
@@ -193,14 +203,35 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
             let cameraGranted = await AVCaptureDevice.requestAccess(for: .video)
             let microphoneGranted = await AVCaptureDevice.requestAccess(for: .audio)
             guard cameraGranted, microphoneGranted else {
-                await MainActor.run { self.onCancel() }
+                await MainActor.run {
+                    self.showCameraError(
+                        "Autorise la caméra et le microphone dans les Réglages pour filmer une torpille.",
+                        offersSettings: true
+                    )
+                }
                 return
             }
             sessionQueue.async { self.configureSession() }
         }
     }
 
+    private func showCameraError(_ message: String, offersSettings: Bool = false) {
+        let alert = UIAlertController(title: "Caméra indisponible", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Fermer", style: .cancel) { [weak self] _ in
+            self?.cancelCapture()
+        })
+        if offersSettings {
+            alert.addAction(UIAlertAction(title: "Ouvrir les Réglages", style: .default) { [weak self] _ in
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                self?.cancelCapture()
+                UIApplication.shared.open(url)
+            })
+        }
+        present(alert, animated: true)
+    }
+
     private func configureSession() {
+        guard !isFinishing else { return }
         session.beginConfiguration()
         session.sessionPreset = .high
 
@@ -208,6 +239,9 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
               let cameraInput = try? AVCaptureDeviceInput(device: camera),
               session.canAddInput(cameraInput) else {
             session.commitConfiguration()
+            DispatchQueue.main.async {
+                self.showCameraError("Impossible de démarrer la caméra. Réessaie dans quelques instants.")
+            }
             return
         }
         session.addInput(cameraInput)
@@ -218,7 +252,14 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
            session.canAddInput(microphoneInput) {
             session.addInput(microphoneInput)
         }
-        if session.canAddOutput(movieOutput) { session.addOutput(movieOutput) }
+        guard session.canAddOutput(movieOutput) else {
+            session.commitConfiguration()
+            DispatchQueue.main.async {
+                self.showCameraError("Impossible de préparer l’enregistrement vidéo. Réessaie dans quelques instants.")
+            }
+            return
+        }
+        session.addOutput(movieOutput)
 
         // AVFoundation raises an Objective-C exception if startRunning() is
         // called between beginConfiguration() and commitConfiguration().
@@ -232,6 +273,14 @@ private final class SwitchableVideoCameraViewController: UIViewController, AVCap
             self.previewLayer = layer
         }
         session.startRunning()
+        let isRunning = session.isRunning
+        DispatchQueue.main.async {
+            self.recordButton.isEnabled = isRunning
+            self.flipButton.isEnabled = isRunning
+            if !isRunning {
+                self.showCameraError("Impossible de démarrer la caméra. Réessaie dans quelques instants.")
+            }
+        }
     }
 
     @objc private func toggleRecording() {
@@ -456,7 +505,7 @@ struct VideoPicker: View {
             selectedFileURL = destination
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = userErrorMessage(error)
         }
     }
 }

@@ -196,24 +196,24 @@ struct IllustratedActionButton: View {
     var trailingText: String? = nil
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.white.opacity(0.20))
-                    .frame(width: 70, height: 70)
+                    .frame(width: 44, height: 44)
                 Image(systemName: illustrationSymbol)
-                    .font(.system(size: 28, weight: .regular))
+                    .font(.system(size: 22, weight: .regular))
                     .foregroundStyle(.white.opacity(0.35))
                 Image(systemName: systemImage)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(12)
+                    .padding(8)
                     .background(.white.opacity(0.22))
                     .clipShape(Circle())
             }
 
             if hasTextContent {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
                     if !title.isEmpty {
                         Text(languageService.phrase(title))
                             .font(.headline)
@@ -244,10 +244,12 @@ struct IllustratedActionButton: View {
                     .foregroundStyle(.white.opacity(0.95))
             }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 64)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(accent.gradient)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: accent.tint.opacity(0.18), radius: 14, x: 0, y: 8)
     }
 
@@ -267,7 +269,7 @@ struct CompactActionButton: View {
             Image(systemName: systemImage)
                 .font(.headline)
                 .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
                 .background(.white.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             Text(languageService.phrase(title))
@@ -276,7 +278,8 @@ struct CompactActionButton: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
         .frame(maxWidth: .infinity, alignment: .leading)
          .background(accent.gradient)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

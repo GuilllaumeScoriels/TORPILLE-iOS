@@ -17,6 +17,15 @@ extension Notification.Name {
     static let torpilleDidReceiveFCMToken = Notification.Name("torpilleDidReceiveFCMToken")
 }
 
+enum PushRegistrationDiagnostics {
+    static func log(_ message: String) {
+        #if DEBUG
+        // Never log device tokens or account identifiers.
+        print("[Push]", message)
+        #endif
+    }
+}
+
 enum MediaAudioSession {
     static func activatePlayback() throws {
         let session = AVAudioSession.sharedInstance()
@@ -530,29 +539,8 @@ final class VideoTransferService {
     }
 
     private func mapStorageUploadError(_ error: Error, buckets: [String]) -> Error {
-        let nsError = error as NSError
-        let message = nsError.localizedDescription.lowercased()
-        let triedBuckets = buckets.joined(separator: ", ")
-
-        if nsError.domain == StorageErrorDomain || nsError.domain.contains("FIRStorageErrorDomain") {
-            if nsError.code == StorageErrorCode.unauthenticated.rawValue || message.contains("unauthenticated") {
-                return TorpilleError.uploadFailed("L'envoi a été refusé car la session Firebase n'est pas reconnue côté Storage.")
-            }
-
-            if nsError.code == StorageErrorCode.unauthorized.rawValue || message.contains("unauthorized") || message.contains("permission") {
-                return TorpilleError.uploadFailed("L'envoi est refusé par les règles Firebase Storage ou par App Check.")
-            }
-
-            if nsError.code == StorageErrorCode.bucketNotFound.rawValue || (message.contains("bucket") && message.contains("not found")) {
-                return TorpilleError.uploadFailed("Le bucket Firebase Storage est introuvable. Buckets testés : \(triedBuckets).")
-            }
-
-            if nsError.code == StorageErrorCode.retryLimitExceeded.rawValue {
-                return TorpilleError.uploadFailed("Le transfert a dépassé le temps limite côté Firebase Storage.")
-            }
-        }
-
-        return TorpilleError.uploadFailed("Échec de l'envoi. Buckets testés : \(triedBuckets). Erreur : \(nsError.domain) / \(nsError.code).")
+        logDiagnostic(error)
+        return TorpilleError.uploadFailed(UserFacingError.message(for: error))
     }
 }
 
@@ -566,6 +554,11 @@ final class NotificationCenterService: NSObject, ObservableObject {
     @Published private(set) var preferencesByCommunityId: [String: CommunityNotificationPreference] = [:]
     @Published var navigationTarget: String?
     @Published var navigationCommunityId: String?
+    @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var notificationSoundEnabled = false
+    @Published private(set) var notificationLockScreenEnabled = false
+    @Published private(set) var pushRegistrationError: String?
+    @Published private(set) var isPushRegistered = false
 
     private let communityRepository: CommunityRepository
     private let userRepository: UserRepository
@@ -595,6 +588,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
     private let maxStoredItems = 200
     private let activityRetentionInterval: TimeInterval = 14 * 24 * 60 * 60
     private var tokenObserver: NSObjectProtocol?
+    private var isRequestingAuthorization = false
 
     init(communityRepository: CommunityRepository, userRepository: UserRepository, languageService: AppLanguageService) {
         self.communityRepository = communityRepository
@@ -611,7 +605,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
             guard let self,
                   let token = notification.userInfo?["token"] as? String else { return }
             Task {
-                try? await self.userRepository.registerFCMToken(token)
+                await self.savePushToken(token)
             }
         }
     }
@@ -630,9 +624,10 @@ final class NotificationCenterService: NSObject, ObservableObject {
         guard startedUID != uid else { return }
         stopListenersOnly()
         startedUID = uid
+        isPushRegistered = false
+        pushRegistrationError = nil
         Task {
             await requestAuthorizationIfNeeded()
-            await syncCurrentFCMTokenIfNeeded()
         }
 
         communitiesRegistration = communityRepository.observeCommunitiesForMe { [weak self] values in
@@ -696,6 +691,8 @@ final class NotificationCenterService: NSObject, ObservableObject {
         }
         stopListenersOnly()
         startedUID = nil
+        isPushRegistered = false
+        pushRegistrationError = nil
         communities = []
         preferencesByCommunityId = [:]
         navigationTarget = nil
@@ -732,21 +729,41 @@ final class NotificationCenterService: NSObject, ObservableObject {
     }
 
     func requestAuthorizationIfNeeded() async {
-        do {
-            let granted = try await notificationCenter.requestAuthorization(options: [.alert, .badge, .sound])
-            print("🔔 notification authorization =", granted)
-            if granted {
-                UIApplication.shared.registerForRemoteNotifications()
+        guard !isRequestingAuthorization else { return }
+        isRequestingAuthorization = true
+        defer { isRequestingAuthorization = false }
+
+        let settings = await notificationCenter.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            do {
+                _ = try await notificationCenter.requestAuthorization(options: [.alert, .badge, .sound])
+            } catch {
+                pushRegistrationError = userErrorMessage(error)
             }
-        } catch {
-            print("🔔 notification authorization failed =", error)
+        }
+        await refreshPushRegistration()
+    }
+
+    func refreshPushRegistration() async {
+        let settings = await notificationCenter.notificationSettings()
+        notificationAuthorizationStatus = settings.authorizationStatus
+        notificationSoundEnabled = settings.soundSetting == .enabled
+        notificationLockScreenEnabled = settings.lockScreenSetting == .enabled
+        PushRegistrationDiagnostics.log("authorization=\(settings.authorizationStatus.rawValue) sound=\(notificationSoundEnabled) lockScreen=\(notificationLockScreenEnabled)")
+        guard auth.currentUser != nil else { return }
+        if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+            PushRegistrationDiagnostics.log("Requesting APNs registration")
+            UIApplication.shared.registerForRemoteNotifications()
+            await syncCurrentFCMTokenIfNeeded()
         }
     }
 
     private func syncCurrentFCMTokenIfNeeded() async {
-        guard auth.currentUser != nil else { return }
+        // The APNs callback fetches and publishes the token once Apple has
+        // registered this device. A cached FCM token alone is not sufficient.
+        guard auth.currentUser != nil, Messaging.messaging().apnsToken != nil else { return }
         if let existingToken = Messaging.messaging().fcmToken, !existingToken.isEmpty {
-            try? await userRepository.registerFCMToken(existingToken)
+            await savePushToken(existingToken)
             return
         }
 
@@ -761,10 +778,31 @@ final class NotificationCenterService: NSObject, ObservableObject {
                 }
             }
             guard !token.isEmpty else { return }
-            try? await userRepository.registerFCMToken(token)
+            await savePushToken(token)
         } catch {
-            print("🔔 FCM token fetch failed =", error)
+            reportPushRegistrationFailure(error)
         }
+    }
+
+    private func savePushToken(_ token: String) async {
+        guard let uid = auth.currentUser?.uid, Messaging.messaging().apnsToken != nil else { return }
+        do {
+            try await userRepository.registerFCMToken(token, for: uid)
+            guard auth.currentUser?.uid == uid else { return }
+            isPushRegistered = true
+            pushRegistrationError = nil
+            PushRegistrationDiagnostics.log("FCM registration saved successfully")
+        } catch {
+            guard auth.currentUser?.uid == uid else { return }
+            reportPushRegistrationFailure(error)
+        }
+    }
+
+    func reportPushRegistrationFailure(_ error: Error) {
+        let nsError = error as NSError
+        PushRegistrationDiagnostics.log("Registration failed: \(nsError.domain) (\(nsError.code))")
+        isPushRegistered = false
+        pushRegistrationError = userErrorMessage(error)
     }
 
     private func attachListeners(to communities: [Community]) {
@@ -791,7 +829,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
                 preferencesByCommunityId[communityId] = CommunityNotificationPreference(
                     communityId: communityId,
                     communityName: community.name,
-                    mode: .mentionsOnly,
+                    mode: .all,
                     updatedAt: nil
                 )
             }
@@ -875,20 +913,21 @@ final class NotificationCenterService: NSObject, ObservableObject {
 
     private func handleIncomingMessage(_ message: Message, community: Community) {
         let myUID = auth.currentUser?.uid ?? ""
-        guard !myUID.isEmpty, message.senderUid != myUID else { return }
+        let settingsChanged = message.systemEvent == "settingsChanged"
+        guard (message.type != "system" || settingsChanged), !myUID.isEmpty, message.senderUid != myUID else { return }
 
         let preference = preference(for: community)
         let isTorpilleMessage = message.torpilleId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let taggedUid = message.taggedUid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if isTorpilleMessage, taggedUid == myUID { return }
-        guard preference.mode == .all else { return }
+        guard preference.mode == .all || settingsChanged else { return }
 
         let item = AppNotificationItem(
             id: "message_\(message.stableId)",
             communityId: community.stableId,
             communityName: community.name,
             title: community.name,
-            body: messageNotificationBody(for: message),
+            body: settingsChanged ? (message.text ?? "Paramètres de la communauté modifiés.") : messageNotificationBody(for: message),
             createdAt: message.createdAt?.dateValue() ?? Date(),
             isRead: false
         )
@@ -899,14 +938,12 @@ final class NotificationCenterService: NSObject, ObservableObject {
         let myUID = auth.currentUser?.uid ?? ""
         guard !myUID.isEmpty, torpille.fromUid != myUID, torpille.toUid == myUID else { return }
 
-        let preference = preference(for: community)
-        guard shouldNotify(preference: preference, isExplicitlyIdentified: true) else { return }
-
+        // Direct torpilles always appear, independently of discussion preferences.
         let senderPseudo = torpille.fromPseudo?.trimmingCharacters(in: .whitespacesAndNewlines)
         let sender = (senderPseudo?.isEmpty == false) ? senderPseudo! : ""
         let senderLabel = sender.isEmpty ? languageService.phrase("Un utilisateur") : "@\(sender)"
         let remainingTime = torpilleRemainingTimeText(torpille)
-        let body = "\(senderLabel) \(languageService.phrase("t'a torpillé.")) \(languageService.phrase("Il te reste")) \(remainingTime) \(languageService.phrase("pour répondre."))"
+        let body = torpille.responseRequired == false ? "\(senderLabel) a répondu hors horaires. Aucune réponse ni pénalité pour toi." : "\(senderLabel) \(languageService.phrase("t'a torpillé.")) \(languageService.phrase("Il te reste")) \(remainingTime) \(languageService.phrase("pour répondre."))"
 
         let item = AppNotificationItem(
             id: "torpille_\(torpille.stableId)",
@@ -1230,7 +1267,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
         return CommunityNotificationPreference(
             communityId: community.stableId,
             communityName: community.name,
-            mode: .mentionsOnly,
+            mode: .all,
             updatedAt: nil
         )
     }
@@ -1253,7 +1290,7 @@ final class NotificationCenterService: NSObject, ObservableObject {
                     self.preferencesByCommunityId[community.stableId] = CommunityNotificationPreference(
                         communityId: community.stableId,
                         communityName: community.name,
-                        mode: .mentionsOnly,
+                        mode: .all,
                         updatedAt: nil
                     )
                 }
@@ -1326,7 +1363,8 @@ extension NotificationCenterService: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .badge])
+        PushRegistrationDiagnostics.log("Foreground notification received source=\(notification.request.trigger is UNPushNotificationTrigger ? "remote" : "local")")
+        completionHandler([.banner, .list, .sound, .badge])
     }
 
     nonisolated func userNotificationCenter(

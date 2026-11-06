@@ -19,6 +19,7 @@ import UIKit
 import FirebaseCore
 import FirebaseAppCheck
 import FirebaseMessaging
+import FirebaseAuth
 
 final class TorpilleAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
     func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
@@ -34,9 +35,12 @@ final class TorpilleAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
     }
 }
 
-final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
+final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate, ObservableObject {
+    @Published private(set) var environment: AppEnvironment?
+    @Published private(set) var launchCompleted = false
     private func publishFCMToken(_ token: String?) {
         guard let token, !token.isEmpty else { return }
+        PushRegistrationDiagnostics.log("FCM registration token received")
         NotificationCenter.default.post(
             name: .torpilleDidReceiveFCMToken,
             object: nil,
@@ -48,15 +52,46 @@ final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDeleg
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        Messaging.messaging().delegate = self
+        // Return to UIKit before initializing Firebase Auth or notification services.
+        // Their startup can consult UIApplication and must not hold up app launch.
         return true
     }
 
+    @MainActor
+    func prepareEnvironmentIfNeeded() {
+        guard !launchCompleted else { return }
+        if FirebaseApp.app() == nil,
+           Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+            AppCheck.setAppCheckProviderFactory(TorpilleAppCheckProviderFactory())
+            FirebaseApp.configure()
+        }
+        if FirebaseApp.app() != nil {
+            let env = AppEnvironment()
+            environment = env
+            Messaging.messaging().delegate = self
+        }
+        launchCompleted = true
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        guard FirebaseApp.app() != nil else { return }
+        PushRegistrationDiagnostics.log("APNs device token received")
+        #if DEBUG
+        // Xcode Debug builds use the development provisioning profile. Explicitly
+        // bind both Firebase services to Sandbox so SDK environment inference
+        // cannot route this development-signed installation to production APNs.
+        Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
+        Messaging.messaging().setAPNSToken(deviceToken, type: .sandbox)
+        PushRegistrationDiagnostics.log("APNs environment=sandbox (Xcode Debug)")
+        #else
+        Auth.auth().setAPNSToken(deviceToken, type: .unknown)
         Messaging.messaging().apnsToken = deviceToken
+        #endif
         Messaging.messaging().token { [weak self] token, error in
             if let error {
-                print("🔔 FCM token fetch after APNs registration failed =", error)
+                Task { @MainActor in
+                    self?.environment?.notificationCenterService.reportPushRegistrationFailure(error)
+                }
                 return
             }
             self?.publishFCMToken(token)
@@ -64,7 +99,21 @@ final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDeleg
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("🔔 APNs registration failed =", error)
+        environment?.notificationCenterService.reportPushRegistrationFailure(error)
+    }
+
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        if FirebaseApp.app() != nil, Auth.auth().canHandleNotification(userInfo) {
+            completionHandler(.noData)
+            return
+        }
+        completionHandler(.noData)
+    }
+
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        guard FirebaseApp.app() != nil else { return false }
+        return Auth.auth().canHandle(url)
     }
 
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
@@ -75,21 +124,8 @@ final class TorpilleAppDelegate: NSObject, UIApplicationDelegate, MessagingDeleg
 @main
 struct TorpilleIOSApp: App {
     @UIApplicationDelegateAdaptor(TorpilleAppDelegate.self) private var appDelegate
-    private let env: AppEnvironment?
-    private let firebaseConfigured: Bool
 
     init() {
-        if FirebaseApp.app() == nil,
-           Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
-
-            AppCheck.setAppCheckProviderFactory(TorpilleAppCheckProviderFactory())
-            FirebaseApp.configure()
-        }
-
-        firebaseConfigured = FirebaseApp.app() != nil
-        env = firebaseConfigured ? AppEnvironment() : nil
-        _ = env?.notificationCenterService
-
         // Keep only a small in-memory cache. Reusable media bytes live mostly
         // on disk and are evicted automatically instead of accumulating while
         // users browse high-volume, mostly one-shot content.
@@ -108,21 +144,38 @@ struct TorpilleIOSApp: App {
             UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
         }
 
-        if !firebaseConfigured {
-            print("🔥 Firebase non configuré au démarrage. Vérifie que GoogleService-Info.plist est bien embarqué dans le target iOS.")
-        }
     }
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let env {
-                    AppRootView(viewModel: AppRootViewModel(env: env))
-                } else {
-                    FirebaseSetupRequiredView()
+            AppStartupView(appDelegate: appDelegate)
+                .preferredColorScheme(ColorScheme.light)
+        }
+    }
+}
+
+/// Observe the published launch state in a view. UIApplicationDelegateAdaptor
+/// installs the delegate, but is not the observation owner for this view's state.
+private struct AppStartupView: View {
+    @ObservedObject var appDelegate: TorpilleAppDelegate
+
+    var body: some View {
+        Group {
+            if let env = appDelegate.environment {
+                AppRootView(viewModel: AppRootViewModel(env: env))
+            } else if appDelegate.launchCompleted {
+                FirebaseSetupRequiredView()
+            } else {
+                ZStack {
+                    Color.white.ignoresSafeArea()
+                    ProgressView("Torpille")
+                        .tint(.blue)
+                        .foregroundStyle(.black)
                 }
             }
-            .preferredColorScheme(ColorScheme.light)
+        }
+        .task { @MainActor in
+            appDelegate.prepareEnvironmentIfNeeded()
         }
     }
 }
@@ -135,11 +188,11 @@ private struct FirebaseSetupRequiredView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Image(systemName: "wrench.and.screwdriver.fill")
                     .font(.system(size: 42))
-                Text(languageService.phrase("Configuration Firebase requise"))
+                Text(languageService.phrase("Application indisponible"))
                     .font(.title2)
                     .bold()
-                Text(languageService.phrase("Ajoute le fichier GoogleService-Info.plist iOS dans le groupe Resources du projet Xcode, puis relance l'application."))
-                Text(languageService.phrase("Le projet source peut s'ouvrir immédiatement dans Xcode, mais les fonctions Firebase ne démarreront qu'après l'ajout de ce fichier."))
+                Text(languageService.phrase("Cette version de l’application ne peut pas démarrer."))
+                Text(languageService.phrase("Installe la dernière mise à jour de Torpille. Si le problème persiste, contacte l’assistance."))
                     .foregroundStyle(.secondary)
                 Spacer()
             }

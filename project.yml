@@ -28,13 +28,16 @@ targets:
         STRIP_INSTALLED_PRODUCT: NO
         DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
         PRODUCT_NAME: TorpilleIOS
+        MARKETING_VERSION: '1.0.7'
+        CURRENT_PROJECT_VERSION: 13
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_LSApplicationQueriesSchemes:
           - https
           - torpille
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Torpille utilise ta position lorsque tu ouvres la carte ou désactives le mode fantôme, afin d’afficher ta dernière position aux membres de tes communautés. Par exemple, après l’ouverture de la carte, ces membres peuvent voir l’endroit de ta dernière mise à jour. Tu peux arrêter ce partage avec le mode fantôme.
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Torpille utilise ta position uniquement après confirmation d’un pointage manuel pour l’afficher aux membres de tes communautés sur la carte pendant 30 minutes. Aucun pointage automatique. Tu peux refuser ou retirer ta position à tout moment.
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Torpille accède aux photos et vidéos que tu sélectionnes afin de définir ta photo de profil ou de partager un média dans une communauté. Par exemple, une vidéo sélectionnée sera téléversée et visible par les membres de cette communauté.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Torpille utilise le microphone lorsque tu enregistres un message vocal ou une vidéo avec du son. Par exemple, cet enregistrement peut être envoyé dans une communauté et écouté par ses membres.
+        INFOPLIST_KEY_NSContactsUsageDescription: Torpille utilise les numéros des contacts autorisés pour retrouver les comptes visibles, sans envoyer leurs noms ni conserver le carnet sur le serveur.
         INFOPLIST_KEY_NSCameraUsageDescription: Torpille utilise la caméra lorsque tu choisis de prendre une photo ou de filmer une vidéo. Par exemple, le média capturé peut être envoyé dans une communauté et sera alors visible par ses membres.
         INFOPLIST_KEY_FirebaseAppDelegateProxyEnabled: NO
         INFOPLIST_KEY_UIBackgroundModes:
@@ -51,6 +54,8 @@ targets:
             CFBundleURLName: com.torpille.deeplink
             CFBundleURLSchemes:
               - torpille
+              - app-1-673304647046-ios-a5b17b3d65b29d3b9c8807
+              - com.googleusercontent.apps.673304647046-najuofl5vsns5qbe9cdr0lt4ihlnlgtt
     dependencies:
       - package: Firebase
         product: FirebaseAuth

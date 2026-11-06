@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.torpille.app",
+      "sha256_cert_fingerprints": [
+        "BB:7E:0E:9F:17:55:B5:60:59:69:3A:55:FF:B5:A4:73:38:BF:CA:BA:6C:25:34:4F:E1:E4:A7:D2:8A:AF:C0:D1"
+      ]
+    }
+  }
+]

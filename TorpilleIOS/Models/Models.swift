@@ -78,6 +78,8 @@ struct Community: Codable, Identifiable {
     var name: String = ""
     var isPublic: Bool = true
     var adminUid: String = ""
+    var rankingSchedule: RankingSchedule?
+    var eliminationMode: Bool?
     var responseTimeSeconds: Int64 = 3600
     var createdAt: Timestamp?
 
@@ -138,9 +140,21 @@ struct Member: Codable, Identifiable {
     var id: String { uid.isEmpty ? (documentId ?? UUID().uuidString) : uid }
 }
 
+/// Emojis members can react with. Must stay identical to the list in firestore.rules
+/// (isValidMessageReactionUpdate).
+enum MessageReaction {
+    static let allowed = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
+}
+
+struct MessageReactionCount: Hashable {
+    let emoji: String
+    let count: Int
+}
+
 struct Message: Codable, Identifiable {
     @DocumentID var documentId: String?
     var id: String?
+    var systemEvent: String?
     var type: String = "text"
     var senderUid: String = ""
     var senderPseudo: String = ""
@@ -166,6 +180,8 @@ struct Message: Codable, Identifiable {
     var savedByPseudo: String?
     var moderationStatus: String?
     var reportCount: Int64?
+    /// Emoji reactions, one per member: uid -> emoji (see MessageReaction.allowed).
+    var reactions: [String: String]? = nil
 
     var stableId: String {
         if let id, !id.isEmpty {
@@ -178,12 +194,28 @@ struct Message: Codable, Identifiable {
         savedAt != nil
     }
 
+    /// Reaction counts in the fixed display order, ignoring unknown values.
+    var reactionSummary: [MessageReactionCount] {
+        let values = Array((reactions ?? [:]).values)
+        return MessageReaction.allowed.compactMap { emoji in
+            let count = values.filter { $0 == emoji }.count
+            return count > 0 ? MessageReactionCount(emoji: emoji, count: count) : nil
+        }
+    }
+
+    func reaction(of uid: String?) -> String? {
+        guard let uid, !uid.isEmpty, let value = reactions?[uid],
+              MessageReaction.allowed.contains(value) else { return nil }
+        return value
+    }
+
     var isQuarantined: Bool {
         moderationStatus != nil && moderationStatus != "visible"
     }
 }
 
 struct Torpille: Codable, Identifiable {
+    var responseRequired: Bool?
     @DocumentID var documentId: String?
     var id: String?
     var fromUid: String = ""
@@ -371,7 +403,7 @@ enum CommunityNotificationMode: String, Codable, CaseIterable, Identifiable {
 struct CommunityNotificationPreference: Codable, Identifiable {
     var communityId: String
     var communityName: String
-    var mode: CommunityNotificationMode = .mentionsOnly
+    var mode: CommunityNotificationMode = .all
     var updatedAt: Timestamp?
 
     var id: String { communityId }
@@ -429,4 +461,81 @@ struct FriendRemoval: Codable, Identifiable {
     var createdAt: Timestamp?
 
     var id: String { documentId ?? UUID().uuidString }
+}
+
+
+struct HomeAnnouncement: Identifiable {
+    let id: String
+    let title: String
+    let body: String
+    let imageUrls: [URL]
+    let priority: Int
+
+    init?(id: String, data: [String: Any]) {
+        guard data["published"] as? Bool == true else { return nil }
+        self.id = id
+        title = String(((data["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))
+        body = String(((data["body"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(6000))
+        var seen = Set<String>()
+        imageUrls = Array(((data["imageUrls"] as? [Any]) ?? []).compactMap { $0 as? String }
+            .compactMap { value -> URL? in
+                let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let url = URL(string: clean), url.scheme == "https", let host = url.host, !host.isEmpty,
+                      seen.insert(clean).inserted else { return nil }
+                return url
+            }.prefix(5))
+        priority = (data["priority"] as? NSNumber)?.intValue ?? 0
+        guard !title.isEmpty || !body.isEmpty || !imageUrls.isEmpty else { return nil }
+    }
+}
+
+struct WeeklyRankingWindow: Codable, Equatable {
+    var day: Int = 1 // ISO weekday: Monday = 1, Sunday = 7
+    var startMinute: Int = 540
+    var endMinute: Int = 1320
+}
+
+// A weekly clock time is not an instant on today's date: using today's local
+// midnight shifts the picker by an hour on daylight-saving transitions.
+enum RankingClockTime {
+    static let timeZone = TimeZone(secondsFromGMT: 0)!
+    static func date(minutes: Int) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(minutes * 60))
+    }
+    static func minutes(in date: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+    }
+}
+struct DatedRankingWindow: Codable, Equatable {
+    var startMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    var endMs: Int64 = Int64(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+}
+struct RankingSchedule: Codable, Equatable {
+    var fullTime = true
+    var timeZone = TimeZone.current.identifier
+    var weekly: [WeeklyRankingWindow] = []
+    var dates: [DatedRankingWindow] = []
+    func isActive(at date: Date = Date()) -> Bool {
+        if fullTime { return true }
+        let ms = Int64(date.timeIntervalSince1970 * 1000)
+        if dates.contains(where: { ms >= $0.startMs && ms < $0.endMs }) { return true }
+        guard let zone = TimeZone(identifier: timeZone) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let day = (calendar.component(.weekday, from: date) + 5) % 7 + 1
+        let minute = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+        return weekly.contains { window in
+            if window.startMinute < window.endMinute {
+                return day == window.day && minute >= window.startMinute && minute < window.endMinute
+            }
+            return (day == window.day && minute >= window.startMinute) || (day == window.day % 7 + 1 && minute < window.endMinute)
+        }
+    }
+    var payload: [String: Any] {
+        ["fullTime": fullTime, "timeZone": timeZone,
+         "weekly": weekly.map { ["day": $0.day, "startMinute": $0.startMinute, "endMinute": $0.endMinute] },
+         "dates": dates.map { ["startMs": $0.startMs, "endMs": $0.endMs] }]
+    }
 }

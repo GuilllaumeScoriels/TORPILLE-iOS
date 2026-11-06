@@ -1,8 +1,13 @@
+import Contacts
+import FirebaseAuth
+import FirebaseFunctions
 import SwiftUI
 import FirebaseFirestore
 import FirebaseStorage
+import UserNotifications
 
 struct HomeScreen: View {
+    @StateObject private var announcementStore = HomeAnnouncementStore()
     @StateObject private var vm: HomeViewModel
     @ObservedObject private var notificationService: NotificationCenterService
     @ObservedObject private var languageService: AppLanguageService
@@ -38,6 +43,10 @@ struct HomeScreen: View {
                     cornerSymbol: "bolt.fill",
                     accent: .ocean
                 )
+
+                ForEach(announcementStore.announcements) { announcement in
+                    HomeAnnouncementCard(announcement: announcement)
+                }
 
                 if vm.isLoadingProfile {
                     TorpilleLoadingView().frame(maxWidth: .infinity).padding()
@@ -129,8 +138,10 @@ struct HomeScreen: View {
         .reserveMainTabBarSpace()
         .onAppear {
             vm.start()
+            announcementStore.start()
             notificationService.start()
         }
+        .onDisappear { announcementStore.stop() }
     }
 
     private var profileSummaryCard: some View {
@@ -170,12 +181,28 @@ struct HomeScreen: View {
 }
 
 struct CommunitiesTabScreen: View {
+    private let env: AppEnvironment
+    @State private var invitationCode = ""
+    @State private var resolvingCode = false
+    @State private var invitationError: String?
+    @State private var joiningCommunityId: String?
+    /// The invitation-code field stays hidden until the user pulls the list down,
+    /// so the communities get the whole screen the rest of the time.
+    @State private var showsInvitationField = false
+    @FocusState private var invitationFieldFocused: Bool
+    /// Probe position when the list is at rest (depends on the navigation bar / safe area).
+    @State private var restingPullOffset: CGFloat?
     @StateObject private var vm: HomeViewModel
     @ObservedObject private var languageService: AppLanguageService
     let onCreateCommunity: () -> Void
     let onOpenCommunity: (String) -> Void
 
+    private static let scrollSpace = "communitiesTabScroll"
+    /// Overscroll distance (pt) needed to reveal the invitation field.
+    private static let revealPullDistance: CGFloat = 60
+
     init(env: AppEnvironment, onCreateCommunity: @escaping () -> Void, onOpenCommunity: @escaping (String) -> Void) {
+        self.env = env
         self.onCreateCommunity = onCreateCommunity
         self.onOpenCommunity = onOpenCommunity
         _languageService = ObservedObject(wrappedValue: env.languageService)
@@ -184,7 +211,17 @@ struct CommunitiesTabScreen: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                // Zero-height probe: its position tells how far the list is pulled down.
+                GeometryReader { proxy in
+                    Color.clear.preference(key: CommunitiesPullOffsetKey.self, value: proxy.frame(in: .named(Self.scrollSpace)).minY)
+                }
+                .frame(height: 0)
+
+                if isInvitationFieldVisible {
+                    invitationField
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 WelcomeHeroCard(
                     title: languageService.phrase("Tes communautés"),
                     subtitle: nil,
@@ -208,9 +245,7 @@ struct CommunitiesTabScreen: View {
                         } label: {
                             IllustratedActionButton(
                                 title: community.name,
-                                subtitle: vm.isPinned(community)
-                                    ? "\(languageService.phrase(community.isPublic ? "Communauté publique" : "Communauté privée")) · \(languageService.phrase("Épinglée"))"
-                                    : languageService.phrase(community.isPublic ? "Communauté publique" : "Communauté privée"),
+                                subtitle: languageService.phrase(community.isPublic ? "Communauté publique" : "Communauté privée"),
                                 systemImage: community.isPublic ? "person.2.wave.2.fill" : "lock.fill",
                                 illustrationSymbol: "flag.2.crossed.fill",
                                 accent: community.isPublic ? .meadow : .berry,
@@ -246,10 +281,25 @@ struct CommunitiesTabScreen: View {
             }
             .padding()
         }
+        .coordinateSpace(name: Self.scrollSpace)
+        .onPreferenceChange(CommunitiesPullOffsetKey.self) { offset in
+            handlePull(offset: offset)
+        }
+        .accessibilityAction(named: Text(languageService.phrase("Code d’invitation"))) {
+            revealInvitationField(focus: true)
+        }
         .background(Color(.systemBackground))
         .navigationTitle(languageService.text(.communities))
         .reserveMainTabBarSpace()
         .onAppear { vm.start() }
+        .sheet(isPresented: Binding(get: { joiningCommunityId != nil }, set: { if !$0 { joiningCommunityId = nil } })) {
+            if let communityId = joiningCommunityId {
+                JoinCommunityScreen(env: env, communityId: communityId, onJoined: {
+                    joiningCommunityId = nil
+                    onOpenCommunity(communityId)
+                }, onCancel: { joiningCommunityId = nil })
+            }
+        }
         .navigationDestination(isPresented: Binding(
             get: { vm.selectedPublicProfile != nil },
             set: { if !$0 { vm.selectedPublicProfile = nil } }
@@ -259,6 +309,88 @@ struct CommunitiesTabScreen: View {
             }
         }
     }
+    private var invitationField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(languageService.phrase("Code d’invitation"), text: $invitationCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($invitationFieldFocused)
+                    .disabled(resolvingCode)
+                    .onSubmit { resolveCode() }
+                if resolvingCode {
+                    ProgressView()
+                } else if !invitationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(languageService.phrase("Rejoindre la communauté")) { resolveCode() }
+                        .font(.subheadline.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let invitationError {
+                Text(invitationError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// Also visible when the user has no community yet (joining is then a main action),
+    /// while typing, or while an error must stay readable.
+    private var isInvitationFieldVisible: Bool {
+        showsInvitationField
+            || invitationFieldFocused
+            || resolvingCode
+            || invitationError != nil
+            || !invitationCode.isEmpty
+            || (vm.communities.isEmpty && !vm.isLoadingCommunities)
+    }
+
+    private func handlePull(offset rawOffset: CGFloat) {
+        // The first value is the resting position; only the distance from it matters.
+        guard let restingPullOffset else { restingPullOffset = rawOffset; return }
+        let offset = rawOffset - restingPullOffset
+        if offset > Self.revealPullDistance {
+            revealInvitationField(focus: false)
+        } else if offset < -120, showsInvitationField, !invitationFieldFocused, invitationCode.isEmpty, invitationError == nil {
+            // Scrolled well into the list without using the field: give the space back.
+            withAnimation(.easeInOut(duration: 0.2)) { showsInvitationField = false }
+        }
+    }
+
+    private func revealInvitationField(focus: Bool) {
+        if !showsInvitationField {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { showsInvitationField = true }
+        }
+        if focus { invitationFieldFocused = true }
+    }
+
+    private func resolveCode() {
+        guard !resolvingCode else { return }
+        resolvingCode = true
+        invitationError = nil
+        Task { @MainActor in
+            defer { resolvingCode = false }
+            do {
+                joiningCommunityId = try await env.communityRepository.resolveInvitationCode(invitationCode)
+                invitationCode = ""
+                invitationFieldFocused = false
+                showsInvitationField = false
+            }
+            catch { invitationError = userErrorMessage(error) }
+        }
+    }
+
+}
+
+private struct CommunitiesPullOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct UserProfileScreen: View {
@@ -336,7 +468,7 @@ struct UserProfileScreen: View {
                 } label: {
                     IllustratedActionButton(
                         title: languageService.phrase("Amis"),
-                        subtitle: "\(vm.friends.count) \(languageService.friendCountWord(vm.friends.count)) · \(languageService.phrase("rechercher par pseudo"))",
+                        subtitle: "\(vm.friends.count) \(languageService.friendCountWord(vm.friends.count))",
                         systemImage: "person.2.fill",
                         illustrationSymbol: "magnifyingglass.circle.fill",
                         accent: .violet
@@ -357,6 +489,7 @@ struct UserProfileScreen: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(vm.isResettingPassword)
                 .accessibilityLabel(languageService.text(.resetPassword))
 
                 if showsPasswordResetInfoNearButton, let info = vm.infoMessage {
@@ -811,6 +944,7 @@ private struct PublicInformationSettingsScreen: View {
 }
 
 private struct FriendsSheet: View {
+    @State private var showPhoneContacts = false
     @ObservedObject var vm: HomeViewModel
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var languageService: AppLanguageService
@@ -835,6 +969,12 @@ private struct FriendsSheet: View {
                     Text(languageService.phrase("Mes amis"))
                 } footer: {
                     Text(languageService.phrase("Le nombre d'amis est toujours visible publiquement."))
+                }
+
+                Section {
+                    Button { showPhoneContacts = true } label: {
+                        Label("Retrouver mes contacts par téléphone", systemImage: "person.crop.circle.badge.checkmark")
+                    }
                 }
 
                 Section {
@@ -890,6 +1030,7 @@ private struct FriendsSheet: View {
                     Text(languageService.phrase("Ouvre ton profil, va dans Amis, puis recherche le pseudo de la personne à ajouter."))
                 }
             }
+            .sheet(isPresented: $showPhoneContacts) { PhoneContactsSheet(vm: vm) }
             .navigationTitle(languageService.phrase("Amis"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1116,7 +1257,7 @@ struct SharedPublicUserProfileView: View {
                 playbackURL = try await memoriesVM.resolvePlaybackURL(for: reel)
                 playbackReel = reel
             } catch {
-                memoriesVM.error = error.localizedDescription
+                memoriesVM.error = userErrorMessage(error)
             }
         }
     }
@@ -1449,6 +1590,44 @@ struct NotificationCenterScreen: View {
     var body: some View {
         List {
             Section {
+                if notificationService.notificationAuthorizationStatus == .notDetermined {
+                    Text(languageService.phrase("Autorise les notifications pour recevoir les messages et les torpilles même lorsque ton iPhone est verrouillé."))
+                    Button(languageService.phrase("Activer les notifications")) {
+                        Task { await notificationService.requestAuthorizationIfNeeded() }
+                    }
+                } else {
+                    if notificationService.notificationAuthorizationStatus == .denied {
+                        Text(languageService.phrase("Les notifications sont désactivées pour Torpille. Active-les dans les réglages de l’iPhone."))
+                    } else if !notificationService.notificationSoundEnabled || !notificationService.notificationLockScreenEnabled {
+                        Text(languageService.phrase("Active les sons et l’écran verrouillé dans les réglages de notifications de Torpille."))
+                    } else {
+                        Text(languageService.phrase("Les sons et les notifications sur l’écran verrouillé sont autorisés."))
+                    }
+                    Button(languageService.phrase("Ouvrir les réglages de notifications")) {
+                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
+                if let error = notificationService.pushRegistrationError {
+                    Text(languageService.localizedRuntimeMessage(error))
+                        .foregroundStyle(.red)
+                }
+                if notificationService.notificationAuthorizationStatus == .authorized {
+                    Text(languageService.phrase(notificationService.isPushRegistered
+                        ? "Cet iPhone est enregistré pour recevoir les notifications."
+                        : "L’enregistrement de cet iPhone pour les notifications n’est pas encore confirmé."))
+                        .font(.footnote)
+                    Button(languageService.phrase("Réessayer l’activation")) {
+                        Task { await notificationService.refreshPushRegistration() }
+                    }
+                }
+            } header: {
+                Text(languageService.phrase("Notifications sur cet iPhone"))
+            } footer: {
+                Text(languageService.phrase("Le mode silencieux et les modes de concentration de l’iPhone peuvent couper le son des notifications."))
+            }
+            Section {
                 Button {
                     isShowingCommunityPreferences = true
                 } label: {
@@ -1645,6 +1824,9 @@ struct NotificationCenterScreen: View {
         .onAppear {
             notificationService.start()
         }
+        .task {
+            await notificationService.refreshPushRegistration()
+        }
     }
 }
 
@@ -1694,6 +1876,205 @@ private struct CommunityNotificationPreferencesSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(languageService.phrase("Fermer")) { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+
+private struct HomeAnnouncementCard: View {
+    let announcement: HomeAnnouncement
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !announcement.title.isEmpty {
+                Text(announcement.title).font(.title3.bold())
+            }
+            if !announcement.body.isEmpty {
+                Text(announcement.body).font(.body).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(announcement.imageUrls, id: \.absoluteString) { url in
+                Color.gray.opacity(0.08)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .overlay {
+                        AsyncImage(url: url) { image in image.resizable().scaledToFit() }
+                            placeholder: { Color.clear }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .accessibilityLabel(announcement.title)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Color(red: 211 / 255, green: 26 / 255, blue: 41 / 255).opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+@MainActor
+private final class PhoneContactsModel: ObservableObject {
+    @Published var phone = ""
+    @Published var verifiedPhone = ""
+    @Published var code = ""
+    @Published var verificationID: String?
+    @Published var discoverable = false
+    @Published var busy = false
+    @Published var message: String?
+    @Published var results: [UserProfile] = []
+    @Published var country = Locale.current.region?.identifier ?? "BE"
+    private let functions = Functions.functions(region: "europe-west1")
+
+    func run(_ operation: @escaping () async throws -> Void) {
+        guard !busy else { return }
+        busy = true
+        message = nil
+        Task {
+            defer { busy = false }
+            do { try await operation() } catch { message = userErrorMessage(error) }
+        }
+    }
+    func load() async throws {
+        let response = try await functions.httpsCallable("getContactDiscoverySettings").call()
+        let data = response.data as? [String: Any] ?? [:]
+        verifiedPhone = data["phoneNumber"] as? String ?? ""
+        discoverable = data["discoverable"] as? Bool ?? false
+    }
+    func sendCode() async throws {
+        let value = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.hasPrefix("+"), value.filter(\.isNumber).count >= 7 else {
+            throw TorpilleError.missingData("Indique ton numéro avec son indicatif international, par exemple +32 ou +33.")
+        }
+        verificationID = nil
+        verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(value, uiDelegate: nil)
+        message = "Code SMS envoyé."
+    }
+    func verify() async throws {
+        guard let id = verificationID, let user = Auth.auth().currentUser else { throw TorpilleError.notAuthenticated }
+        let credential = PhoneAuthProvider.provider().credential(withVerificationID: id, verificationCode: code.trimmingCharacters(in: .whitespacesAndNewlines))
+        if user.phoneNumber == nil {
+            _ = try await user.link(with: credential)
+        } else {
+            try await user.updatePhoneNumber(credential)
+        }
+        _ = try await user.getIDToken(forcingRefresh: true)
+        verificationID = nil
+        code = ""
+        try await load()
+        message = "Numéro vérifié. Tu peux maintenant retrouver tes contacts."
+    }
+    func setVisibility() async throws {
+        _ = try await functions.httpsCallable("setContactDiscoverySettings").call(["discoverable": !discoverable])
+        try await load()
+    }
+    func search(_ numbers: [String]) async throws {
+        results = []
+        let unique = Array(Set(numbers.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }))
+        guard !unique.isEmpty else { message = "Aucun numéro à rechercher."; return }
+        guard unique.count <= 2000 else { throw TorpilleError.missingData("Ton carnet contient plus de 2 000 numéros. Utilise la recherche par numéro.") }
+        var found: [String: UserProfile] = [:]
+        for start in stride(from: 0, to: unique.count, by: 100) {
+            let response = try await functions.httpsCallable("findPhoneContacts").call([
+                "numbers": Array(unique[start..<min(start + 100, unique.count)]), "country": country.uppercased()
+            ])
+            let data = response.data as? [String: Any] ?? [:]
+            for item in data["profiles"] as? [[String: Any]] ?? [] {
+                guard let uid = item["uid"] as? String, let pseudo = item["pseudo"] as? String else { continue }
+                found[uid] = UserProfile(uid: uid, pseudo: pseudo, photoUrl: item["photoUrl"] as? String,
+                    profileIcon: item["profileIcon"] as? String, isLanguagePublic: false, isLeaderboardPublic: false,
+                    friendsCount: item["friendsCount"] as? Int ?? 0)
+            }
+        }
+        results = found.values.sorted { $0.pseudo.localizedCaseInsensitiveCompare($1.pseudo) == .orderedAscending }
+        message = results.isEmpty ? "Aucun contact visible sur Torpille. Seuls les numéros vérifiés avec la visibilité activée peuvent être trouvés." : "\(results.count) contact(s) trouvé(s)."
+    }
+    func searchAddressBook() async throws {
+        let store = CNContactStore()
+        guard try await store.requestAccess(for: .contacts) else {
+            throw TorpilleError.missingData("Accès aux contacts refusé. Autorise-le dans Réglages ou recherche un numéro manuellement.")
+        }
+        // Read off the main thread. Names and other contact fields are never requested.
+        let numbers = try await Task.detached {
+            let contactStore = CNContactStore()
+            var values: [String] = []
+            let request = CNContactFetchRequest(keysToFetch: [CNContactPhoneNumbersKey as CNKeyDescriptor])
+            try contactStore.enumerateContacts(with: request) { contact, _ in
+                values.append(contentsOf: contact.phoneNumbers.map { $0.value.stringValue })
+            }
+            return values
+        }.value
+        try await search(numbers)
+    }
+}
+
+private struct PhoneContactsSheet: View {
+    @ObservedObject var vm: HomeViewModel
+    @StateObject private var model = PhoneContactsModel()
+    @Environment(\.dismiss) private var dismiss
+    @State private var numberQuery = ""
+    @State private var pending: UserProfile?
+    @State private var sent = Set<String>()
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Mon numéro") {
+                    Text("Vérifie ton numéro pour retrouver tes contacts. Ton numéro n’est jamais affiché sur ton profil public.")
+                    if !model.verifiedPhone.isEmpty { Text("Numéro vérifié : \(model.verifiedPhone)") }
+                    TextField("Numéro avec indicatif (+32, +33…)", text: $model.phone).keyboardType(.phonePad)
+                        .onChange(of: model.phone) { _, _ in model.verificationID = nil; model.code = "" }
+                    Button("Recevoir un code SMS") { model.run { try await model.sendCode() } }
+                        .disabled(model.busy || model.phone.isEmpty)
+                    Text("En continuant, tu acceptes que Firebase traite ton numéro pour la vérification et la prévention des abus. Des frais SMS peuvent s’appliquer.").font(.caption).foregroundStyle(.secondary)
+                    if model.verificationID != nil {
+                        TextField("Code SMS", text: $model.code).keyboardType(.numberPad).textContentType(.oneTimeCode)
+                        Button("Vérifier mon numéro") { model.run { try await model.verify() } }.disabled(model.busy || model.code.count < 6)
+                    }
+                }
+                if !model.verifiedPhone.isEmpty {
+                    Section("Être retrouvé") {
+                        Text(model.discoverable ? "Tes contacts peuvent te retrouver avec ton numéro." : "La recherche de ton compte par numéro est désactivée.")
+                        Button(model.discoverable ? "Désactiver ma visibilité" : "Autoriser la recherche de mon numéro") {
+                            model.run { try await model.setVisibility() }
+                        }.disabled(model.busy)
+                    }
+                    Section("Retrouver mes contacts") {
+                        Picker("Pays des numéros sans indicatif", selection: $model.country) {
+                            ForEach(Locale.isoRegionCodes, id: \.self) { code in
+                                Text(Locale.current.localizedString(forRegionCode: code) ?? code).tag(code)
+                            }
+                        }
+                        TextField("Numéro à rechercher", text: $numberQuery).keyboardType(.phonePad)
+                        Button("Rechercher ce numéro") { model.run { try await model.search([numberQuery]) } }
+                            .disabled(model.busy || numberQuery.isEmpty)
+                        Text("En choisissant Retrouver mes contacts, tu autorises l’envoi de leurs numéros à Torpille pour cette recherche. Ils ne sont pas conservés. Les noms ne sont pas envoyés.").font(.caption)
+                        Button("Retrouver mes contacts") { model.run { try await model.searchAddressBook() } }.disabled(model.busy)
+                    }
+                }
+                if model.busy { ProgressView() }
+                if let message = model.message { Text(message).font(.callout) }
+                ForEach(model.results) { profile in
+                    HStack {
+                        Text("@\(profile.pseudo)")
+                        Spacer()
+                        if vm.friends.contains(where: { $0.uid == profile.uid }) { Text("Ami") }
+                        else if sent.contains(profile.uid) { Text("Demande envoyée") }
+                        else { Button("Ajouter") { pending = profile }.disabled(model.busy) }
+                    }
+                }
+            }
+            .disabled(model.busy)
+            .navigationTitle("Contacts téléphoniques")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { dismiss() } } }
+            .task { model.run { try await model.load() } }
+            .alert("Envoyer une demande d’ami ?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
+                Button("Annuler", role: .cancel) { pending = nil }
+                Button("Envoyer") {
+                    guard let profile = pending else { return }
+                    pending = nil
+                    model.run {
+                        if await vm.sendFriendRequestAndWait(to: profile) { sent.insert(profile.uid); model.message = "Demande envoyée." }
+                        else { model.message = vm.error }
+                    }
                 }
             }
         }

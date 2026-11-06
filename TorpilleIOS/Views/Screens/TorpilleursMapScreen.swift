@@ -6,7 +6,7 @@
  Ce que fait ce fichier :
  - Liste les communautés de l'utilisateur.
  - Montre les membres géolocalisés sur une carte MapKit.
- - Affiche la dernière position connue synchronisée automatiquement au démarrage de l'application.
+ - Affiche uniquement les pointages manuels récents, sans publication automatique.
 
  Pourquoi c'est utile :
  - La version iOS reprend la fonctionnalité carte demandée par l'utilisateur.
@@ -30,6 +30,9 @@ struct TorpilleursMapScreen: View {
     @State private var torpilleFileURL: URL?
     @State private var showCommunityChooser = false
     @State private var showTorpilleCamera = false
+    @State private var showCheckInConsent = false
+    @State private var userPendingBlock: MapMemberAnnotation?
+    private let displayTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     init(env: AppEnvironment) {
         _languageService = ObservedObject(wrappedValue: env.languageService)
@@ -93,19 +96,19 @@ struct TorpilleursMapScreen: View {
                             .padding(.horizontal)
                         }
 
-                        Toggle(isOn: Binding(
-                            get: { vm.isGhostMode },
-                            set: { vm.setGhostMode($0) }
-                        )) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label(languageService.phrase("Mode fantôme"), systemImage: "eye.slash.fill")
-                                    .font(.subheadline.weight(.semibold))
-                                Text(languageService.phrase("Masque ta position et les autres utilisateurs sur la carte."))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(languageService.phrase("Ta position est partagée uniquement après un pointage manuel, pendant 30 minutes. Aucun partage automatique."))
+                                .font(.footnote)
+                            Button {
+                                showCheckInConsent = true
+                            } label: {
+                                Label(languageService.phrase("Partager ma position maintenant"), systemImage: "location.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            Button(languageService.phrase("Retirer ma position"), role: .destructive) {
+                                vm.hideMyLocation()
                             }
                         }
-                        .tint(.purple)
                         .disabled(vm.isUpdatingGhostMode)
                         .padding(.horizontal)
 
@@ -118,12 +121,9 @@ struct TorpilleursMapScreen: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        .disabled(vm.isGhostMode)
                         .padding(.horizontal)
 
                         Map(position: $cameraPosition) {
-                            if !vm.isGhostMode {
-                                UserAnnotation()
                                 ForEach(vm.annotations) { item in
                                 Annotation(
                                     item.pseudo,
@@ -143,7 +143,6 @@ struct TorpilleursMapScreen: View {
                             }
                             }
                         }
-                        }
                         .mapStyle(.standard)
                         .frame(minHeight: 420)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -156,14 +155,8 @@ struct TorpilleursMapScreen: View {
 
                             ScrollView(.vertical, showsIndicators: true) {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    if vm.isGhostMode {
-                                        Text(languageService.phrase("Le mode fantôme est actif : ta position n'est pas partagée et aucun autre utilisateur n'apparaît sur ta carte."))
-                                    } else {
-                                        Text(vm.selectedCommunityId.isEmpty
-                                             ? languageService.phrase("La carte montre tous les torpilleurs avec qui tu partages au moins une communauté.")
-                                             : languageService.phrase("La carte montre uniquement les torpilleurs de la communauté sélectionnée."))
-                                        Text(languageService.phrase("L'heure affichée à côté de l'icône est celle de la dernière torpille de l'utilisateur concerné."))
-                                    }
+                                    Text(languageService.phrase("La carte montre les pointages manuels des membres de tes communautés pendant 30 minutes. Pour actualiser ta position, confirme un nouveau pointage."))
+
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -219,6 +212,15 @@ struct TorpilleursMapScreen: View {
                 )) {
                     if let profile = vm.selectedPublicProfile {
                         SharedPublicUserProfileView(profile: profile)
+                            .toolbar {
+                                if profile.id != vm.currentUserId {
+                                    Button(languageService.phrase("Bloquer cet utilisateur"), role: .destructive) {
+                                        userPendingBlock = MapMemberAnnotation(id: profile.id, pseudo: profile.pseudo,
+                                            latitude: 0, longitude: 0, subtitle: "", photoUrl: profile.photoUrl,
+                                            profileIcon: profile.profileIcon, lastTorpilleTimeText: "")
+                                    }
+                                }
+                            }
                     }
                 }
                 .onChange(of: torpilleFileURL) { _, newValue in
@@ -253,7 +255,26 @@ struct TorpilleursMapScreen: View {
                 .padding(.bottom, bottomInset + 24)
                 .reserveMainTabBarSpace()
             }
+            .confirmationDialog(languageService.phrase("Partager ma position ?"), isPresented: $showCheckInConsent, titleVisibility: .visible) {
+                Button(languageService.phrase("Partager ma position maintenant")) { vm.checkIn() }
+                Button(languageService.phrase("Annuler"), role: .cancel) { }
+            } message: {
+                Text(languageService.phrase("Les membres de tes communautés pourront voir cette position sur la carte pendant 30 minutes. Ce pointage est unique : aucun renouvellement automatique. Tu peux refuser ou retirer ta position à tout moment."))
+            }
+            .confirmationDialog(languageService.phrase("Bloquer cet utilisateur ?"), isPresented: Binding(
+                get: { userPendingBlock != nil }, set: { if !$0 { userPendingBlock = nil } }
+            ), titleVisibility: .visible) {
+                Button(languageService.phrase("Bloquer cet utilisateur"), role: .destructive) {
+                    if let userPendingBlock { vm.blockMapUser(userPendingBlock) }
+                    userPendingBlock = nil
+                }
+                Button(languageService.phrase("Annuler"), role: .cancel) { userPendingBlock = nil }
+            } message: {
+                Text(languageService.phrase("Cet utilisateur sera masqué dans l'application. Pour le débloquer, va dans ton profil."))
+            }
+            .onReceive(displayTimer) { vm.updateLocationDisplayDate($0) }
             .onAppear {
+                vm.updateLocationDisplayDate(Date())
                 vm.start()
             }
             .onChange(of: vm.annotations) { _, annotations in

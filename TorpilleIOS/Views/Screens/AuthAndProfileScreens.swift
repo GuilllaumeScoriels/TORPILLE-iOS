@@ -1,17 +1,29 @@
 import SwiftUI
+import UIKit
 
 struct AuthScreen: View {
     @StateObject private var vm: AuthViewModel
-    @State private var isPreparingSignUp = false
+    private enum AuthPage: String, Identifiable, Hashable {
+        case signIn, signUp, forgotPassword
+        var id: String { rawValue }
+    }
+    /// Page pushed from the choice screen (nil = choice screen).
+    @State private var page: AuthPage?
+    /// Page to open once the legal documents have been accepted.
+    @State private var pageAfterLegal: AuthPage?
     @State private var presentedLegalDocument: LegalDocument?
     @State private var legalAcceptance = LegalAcceptanceDraft()
     @State private var hasContinuedFromLegal = false
-    @State private var hasReadEULA = false
+    @State private var showsLegalAcceptance = false
+    @State private var completingSignIn = false
+    @State private var showsPassword = false
+    private enum Field: Hashable { case email, password, passwordConfirmation }
+    @FocusState private var focusedField: Field?
     @ObservedObject private var languageService: AppLanguageService
-    let onSignedIn: () -> Void
+    let onSignedIn: () async throws -> Void
     let onSignedUp: () -> Void
 
-    init(onSignedIn: @escaping () -> Void, onSignedUp: @escaping () -> Void, env: AppEnvironment) {
+    init(onSignedIn: @escaping () async throws -> Void, onSignedUp: @escaping () -> Void, env: AppEnvironment) {
         self.onSignedIn = onSignedIn
         self.onSignedUp = onSignedUp
         _languageService = ObservedObject(wrappedValue: env.languageService)
@@ -20,16 +32,21 @@ struct AuthScreen: View {
 
     var body: some View {
         Group {
-            if hasContinuedFromLegal && legalAcceptance.canContinue {
-                authenticationForm
-            } else {
-                legalWelcomePage
-            }
+            if showsLegalAcceptance { legalWelcomePage }
+            else { choicePage }
         }
         .navigationTitle("Torpille")
+        .navigationDestination(item: $page) { page in
+            authPage(page)
+        }
+        .onAppear {
+            if !vm.currentUID.isEmpty && !DeviceLegalAcceptance.hasAcceptedCurrentVersion {
+                completingSignIn = true
+                showsLegalAcceptance = true
+            }
+        }
         .sheet(item: $presentedLegalDocument) { document in
             LegalDocumentSheet(document: document, languageService: languageService) {
-                hasReadEULA = true
                 legalAcceptance.acceptsEULA = true
                 presentedLegalDocument = nil
             }
@@ -58,8 +75,17 @@ struct AuthScreen: View {
 
                 VStack(alignment: .leading, spacing: 14) {
                     authLegalDocumentButton(document: .eula, isAccepted: legalAcceptance.acceptsEULA)
-                    Toggle(languageService.phrase("J’accepte les règles EULA"), isOn: $legalAcceptance.acceptsEULA)
-                        .disabled(!hasReadEULA)
+                    Toggle(languageService.phrase("J’accepte les règles EULA"), isOn: Binding(
+                        get: { legalAcceptance.acceptsEULA },
+                        set: { wantsToAccept in
+                            if wantsToAccept {
+                                // Acceptance is confirmed at the bottom of the document.
+                                presentedLegalDocument = .eula
+                            } else {
+                                legalAcceptance.acceptsEULA = false
+                            }
+                        }
+                    ))
                 }
                 .padding(18)
                 .background(Color(.secondarySystemGroupedBackground))
@@ -79,8 +105,19 @@ struct AuthScreen: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button {
-                    guard DeviceLegalAcceptance.record(legalAcceptance) else { return }
-                    hasContinuedFromLegal = true
+                    if completingSignIn {
+                        guard DeviceLegalAcceptance.recordForAccount(legalAcceptance, uid: vm.currentUID) else { return }
+                        showsLegalAcceptance = false
+                        vm.completeSignIn(onSuccess: onSignedIn)
+                    } else {
+                        guard DeviceLegalAcceptance.record(legalAcceptance) else { return }
+                        hasContinuedFromLegal = true
+                        showsLegalAcceptance = false
+                        if let next = pageAfterLegal {
+                            pageAfterLegal = nil
+                            page = next
+                        }
+                    }
                 } label: {
                     Text(languageService.phrase("Continuer"))
                         .font(.headline)
@@ -89,174 +126,336 @@ struct AuthScreen: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!legalAcceptance.canContinue)
+
+                if !completingSignIn {
+                    // Opened from the sign-up choice or "review": let the user go back.
+                    Button(languageService.phrase("Retour")) {
+                        showsLegalAcceptance = false
+                        pageAfterLegal = nil
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("legal.back")
+                }
             }
             .padding(24)
         }
         .background(Color(.systemBackground))
     }
 
-    private var authenticationForm: some View {
+    private var choicePage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                WelcomeHeroCard(
-                    title: languageService.text(.authWelcomeTitle),
-                    subtitle: languageService.text(.authWelcomeSubtitle),
-                    primarySymbol: "bolt.fill",
-                    secondarySymbol: "sparkles",
-                    cornerSymbol: "arrow.right.circle.fill",
-                    accent: .ocean
-                )
+            VStack(spacing: 28) {
+                VStack(spacing: 14) {
+                    Image("TorpilleLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 96, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .accessibilityHidden(true)
+                    Text(languageService.text(.authWelcomeTitle))
+                        .font(.title.bold())
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 24)
 
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(spacing: 12) {
+                    choiceButton(.signIn, title: languageService.text(.authSignIn),
+                                 systemImage: "person.crop.circle.badge.checkmark", illustration: "lock.shield.fill", accent: .meadow)
+                    choiceButton(.signUp, title: languageService.text(.authSignUp),
+                                 systemImage: "person.badge.plus.fill", illustration: "sparkles", accent: .sunset)
+                    choiceButton(.forgotPassword, title: languageService.text(.authForgotPassword),
+                                 systemImage: "key.fill", illustration: "envelope.open.fill", accent: .gold)
+                }
+
+                VStack(spacing: 12) {
                     Picker(languageService.text(.appLanguage), selection: $languageService.language) {
                         ForEach(AppLanguage.allCases) { language in
                             Text(language.nativeLabel).tag(language)
                         }
                     }
-                    .padding()
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    SectionTitleView(title: languageService.text(.authSectionTitle), subtitle: languageService.text(.authSectionSubtitle))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(languageService.text(.authVerificationNoticeTitle))
-                            .font(.subheadline.weight(.semibold))
-                        Text(languageService.text(.authVerificationNoticeSubtitle))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    Button(languageService.phrase("Revoir mes acceptations")) {
+                        pageAfterLegal = nil
+                        showsLegalAcceptance = true
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.tertiarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-                    TextField(languageService.text(.authEmailPlaceholder), text: $vm.email)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                        .textContentType(.emailAddress)
-                        .autocorrectionDisabled()
-                        .textCase(nil)
-                        .submitLabel(.next)
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    SecureField(languageService.text(.authPasswordPlaceholder), text: $vm.password)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-                        .onSubmit {
-                            vm.signIn(hasAcceptedRequiredDocuments: acceptsRequiredDocuments, onSuccess: onSignedIn)
+                    HStack(spacing: 18) {
+                        Link(destination: AppExternalLinks.privacyPolicy(language: languageService.effectiveLanguage)) {
+                            Text(languageService.phrase("Politique de confidentialité"))
                         }
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    if isPreparingSignUp {
-                        SecureField(languageService.text(.authConfirmPasswordPlaceholder), text: $vm.passwordConfirmation)
-                            .textContentType(.newPassword)
-                            .submitLabel(.done)
-                            .onSubmit {
-                                vm.signUp(hasAcceptedRequiredDocuments: acceptsRequiredDocuments, onSuccess: onSignedUp)
-                            }
-                            .padding()
-                            .background(Color(.secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-
-                    }
-                }
-                .padding(18)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-
-                Button(languageService.phrase("Revoir mes acceptations")) {
-                    hasContinuedFromLegal = false
-                }
-
-                HStack(spacing: 18) {
-                    Link(destination: AppExternalLinks.privacyPolicy(language: languageService.effectiveLanguage)) {
-                        Label(languageService.phrase("Politique de confidentialité"), systemImage: "hand.raised.fill")
-                    }
-                    Link(destination: AppExternalLinks.support) {
-                        Label(languageService.phrase("Support et contact"), systemImage: "envelope.fill")
-                    }
-                }
-                .font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button {
-                    vm.signIn(hasAcceptedRequiredDocuments: acceptsRequiredDocuments, onSuccess: onSignedIn)
-                } label: {
-                    IllustratedActionButton(
-                        title: vm.isLoading ? languageService.text(.authLoading) : languageService.text(.authSignIn),
-                        subtitle: languageService.text(.authSignInSubtitle),
-                        systemImage: "person.crop.circle.badge.checkmark",
-                        illustrationSymbol: "lock.shield.fill",
-                        accent: .meadow
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(vm.isLoading || !acceptsRequiredDocuments)
-
-                Button {
-                    if isPreparingSignUp {
-                        vm.signUp(hasAcceptedRequiredDocuments: acceptsRequiredDocuments, onSuccess: onSignedUp)
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isPreparingSignUp = true
+                        Link(destination: AppExternalLinks.support) {
+                            Text(languageService.phrase("Support et contact"))
                         }
                     }
-                } label: {
-                    IllustratedActionButton(
-                        title: languageService.text(.authSignUp),
-                        subtitle: languageService.text(.authSignUpSubtitle),
-                        systemImage: "person.badge.plus.fill",
-                        illustrationSymbol: "sparkles",
-                        accent: .sunset
-                    )
                 }
-                .buttonStyle(.plain)
-                .disabled(vm.isLoading || !acceptsRequiredDocuments)
-
-                Button {
-                    vm.resetPassword()
-                } label: {
-                    IllustratedActionButton(
-                        title: languageService.text(.authForgotPassword),
-                        subtitle: languageService.text(.authForgotPasswordSubtitle),
-                        systemImage: "key.fill",
-                        illustrationSymbol: "envelope.open.fill",
-                        accent: .gold
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(vm.isLoading)
-
-                if let info = vm.infoMessage {
-                    // AuthViewModel already creates this text in the selected language.
-                    Text(info)
-                        .foregroundStyle(.green)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-
-                if let error = vm.error {
-                    // AuthViewModel maps Firebase Auth errors to the selected language.
-                    Text(error)
-                        .foregroundStyle(.red)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.red.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
             .padding()
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(.systemBackground))
-        .navigationTitle("Torpille")
+    }
+
+    private func choiceButton(_ target: AuthPage, title: String, systemImage: String, illustration: String, accent: ActionAccent) -> some View {
+        Button {
+            open(target)
+        } label: {
+            IllustratedActionButton(title: title, subtitle: nil, systemImage: systemImage,
+                                    illustrationSymbol: illustration, accent: accent)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("auth.choice.\(target.rawValue)")
+    }
+
+    private func authPage(_ page: AuthPage) -> some View {
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let info = vm.infoMessage {
+                        Label(info, systemImage: "checkmark.circle.fill")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.green.opacity(0.14))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .id("auth.infoMessage")
+                            .accessibilityIdentifier("auth.infoMessage")
+                    }
+
+                    // One plain instruction per page.
+                    Text(instruction(for: page))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    authField(systemImage: "envelope") {
+                        TextField(languageService.text(.authEmailPlaceholder), text: $vm.email)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                            .textContentType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .submitLabel(page == .forgotPassword ? .send : .next)
+                            .focused($focusedField, equals: .email)
+                            .onSubmit {
+                                if page == .forgotPassword { performPrimary(page) } else { focusedField = .password }
+                            }
+                            .accessibilityIdentifier("auth.email")
+                    }
+
+                    if page != .forgotPassword {
+                        authField(systemImage: "lock") {
+                            Group {
+                                if showsPassword {
+                                    TextField(languageService.text(.authPasswordPlaceholder), text: $vm.password)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                } else {
+                                    SecureField(languageService.text(.authPasswordPlaceholder), text: $vm.password)
+                                }
+                            }
+                            .textContentType(page == .signUp ? .newPassword : .password)
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(page == .signUp ? .next : .go)
+                            .onSubmit {
+                                if page == .signUp { focusedField = .passwordConfirmation } else { performPrimary(page) }
+                            }
+                            .accessibilityIdentifier("auth.password")
+                            showPasswordButton
+                        }
+                    }
+
+                    if page == .signUp {
+                        authField(systemImage: "lock.rotation") {
+                            Group {
+                                if showsPassword {
+                                    TextField(languageService.text(.authConfirmPasswordPlaceholder), text: $vm.passwordConfirmation)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                } else {
+                                    SecureField(languageService.text(.authConfirmPasswordPlaceholder), text: $vm.passwordConfirmation)
+                                }
+                            }
+                            .textContentType(.newPassword)
+                            .focused($focusedField, equals: .passwordConfirmation)
+                            .submitLabel(.done)
+                            .onSubmit { performPrimary(page) }
+                            .accessibilityIdentifier("auth.passwordConfirmation")
+                        }
+                    }
+
+                    Button {
+                        performPrimary(page)
+                    } label: {
+                        HStack(spacing: 10) {
+                            if vm.isLoading { ProgressView().tint(.white) }
+                            Text(vm.isLoading ? languageService.text(.authLoading) : primaryTitle(for: page))
+                                .font(.headline)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent(for: page).tint)
+                    .disabled(vm.isLoading)
+                    .accessibilityIdentifier("auth.submit.\(page.rawValue)")
+
+                    if page == .signIn {
+                        Button(languageService.phrase("Mot de passe oublié ?")) {
+                            vm.error = nil
+                            vm.infoMessage = nil
+                            self.page = .forgotPassword
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .disabled(vm.isLoading)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+            }
+            .background(Color(.systemBackground))
+            .navigationTitle(primaryPageTitle(for: page))
+            .navigationBarTitleDisplayMode(.large)
+            .scrollDismissesKeyboard(.interactively)
+            .task {
+                // Put the cursor where the user has to type first.
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                focusedField = (page == .forgotPassword || vm.email.isEmpty) ? .email : .password
+            }
+            .onChange(of: vm.infoMessage) { _, message in
+                guard let message else { return }
+                focusedField = nil
+                // Scroll after the notice is inserted and the keyboard starts closing.
+                Task { @MainActor in
+                    await Task.yield()
+                    guard vm.infoMessage == message else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        scrollProxy.scrollTo("auth.infoMessage", anchor: .top)
+                    }
+                    UIAccessibility.post(notification: .announcement, argument: message)
+                }
+            }
+            .alert(languageService.phrase(errorTitle(for: page)), isPresented: Binding(
+                get: { vm.error != nil }, set: { if !$0 { vm.error = nil } }
+            )) {
+                Button("OK", role: .cancel) { vm.error = nil }
+            } message: {
+                Text(languageService.localizedRuntimeMessage(vm.error ?? ""))
+            }
+        }
+    }
+
+    private func instruction(for page: AuthPage) -> String {
+        switch page {
+        case .signIn:
+            return languageService.phrase("Entre ton email et ton mot de passe.")
+        case .signUp:
+            return languageService.phrase("Choisis ton email et un mot de passe d’au moins 6 caractères. Tu recevras un email pour confirmer ton adresse.")
+        case .forgotPassword:
+            return languageService.phrase("Entre l’email de ton compte. Tu recevras un lien pour choisir un nouveau mot de passe.")
+        }
+    }
+
+    private func primaryPageTitle(for page: AuthPage) -> String {
+        switch page {
+        case .signIn: return languageService.text(.authSignIn)
+        case .signUp: return languageService.text(.authSignUp)
+        case .forgotPassword: return languageService.text(.authForgotPassword)
+        }
+    }
+
+    private func primaryTitle(for page: AuthPage) -> String {
+        switch page {
+        case .signIn: return languageService.text(.authSignIn)
+        case .signUp: return languageService.phrase("Créer mon compte")
+        case .forgotPassword: return languageService.phrase("Envoyer le lien")
+        }
+    }
+
+    private func errorTitle(for page: AuthPage) -> String {
+        switch page {
+        case .signIn: return "Connexion impossible"
+        case .signUp: return "Création du compte impossible"
+        case .forgotPassword: return "Envoi impossible"
+        }
+    }
+
+    private func accent(for page: AuthPage) -> ActionAccent {
+        switch page {
+        case .signIn: return .meadow
+        case .signUp: return .sunset
+        case .forgotPassword: return .gold
+        }
+    }
+
+    private var showPasswordButton: some View {
+        Button {
+            showsPassword.toggle()
+        } label: {
+            Image(systemName: showsPassword ? "eye.slash" : "eye")
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(languageService.phrase(showsPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"))
+    }
+
+    private func authField<Content: View>(systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            content()
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func open(_ target: AuthPage) {
+        vm.error = nil
+        vm.infoMessage = nil
+        vm.password = ""
+        vm.passwordConfirmation = ""
+        showsPassword = false
+        if target == .signUp && !acceptsRequiredDocuments {
+            // Creating an account requires reading and accepting both documents first.
+            legalAcceptance = LegalAcceptanceDraft()
+            hasContinuedFromLegal = false
+            pageAfterLegal = .signUp
+            showsLegalAcceptance = true
+        } else {
+            page = target
+        }
+    }
+
+    private func performPrimary(_ page: AuthPage) {
+        focusedField = nil
+        switch page {
+        case .signIn:
+            performSignIn()
+        case .signUp:
+            vm.signUp(hasAcceptedRequiredDocuments: acceptsRequiredDocuments, onSuccess: onSignedUp)
+        case .forgotPassword:
+            vm.resetPassword()
+        }
+    }
+
+    private func performSignIn() {
+        focusedField = nil
+        vm.signIn(hasAcceptedRequiredDocuments: true) {
+            if DeviceLegalAcceptance.hasAcceptedCurrentVersion { try await onSignedIn() }
+            else {
+                legalAcceptance = LegalAcceptanceDraft()
+                completingSignIn = true
+                page = nil
+                showsLegalAcceptance = true
+            }
+        }
     }
 
     private var acceptsRequiredDocuments: Bool {
@@ -611,7 +810,7 @@ struct ProfileSetupScreen: View {
                 } label: {
                     IllustratedActionButton(
                         title: vm.isSaving ? languageService.text(.saving) : languageService.text(.profileContinue),
-                        subtitle: languageService.text(.profileContinueSubtitle),
+                        subtitle: nil,
                         systemImage: "arrow.right.circle.fill",
                         illustrationSymbol: "checkmark.seal.fill",
                         accent: .meadow

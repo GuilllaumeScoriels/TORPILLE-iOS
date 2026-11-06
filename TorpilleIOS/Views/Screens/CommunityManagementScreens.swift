@@ -13,6 +13,7 @@ import SwiftUI
 import AVFoundation
 import AVKit
 import UIKit
+import UniformTypeIdentifiers
 
 private struct ResponseTimePickerCard: View {
     @Binding var hours: Int
@@ -99,7 +100,7 @@ struct CreateCommunityScreen: View {
                 } label: {
                     IllustratedActionButton(
                         title: vm.isLoading ? languageService.phrase("Création…") : languageService.phrase("Créer"),
-                        subtitle: languageService.phrase("Valide les paramètres et ouvre la communauté."),
+                        subtitle: nil,
                         systemImage: "plus.circle.fill",
                         illustrationSymbol: "person.3.sequence.fill",
                         accent: .meadow
@@ -197,14 +198,21 @@ struct CommunityInfoScreen: View {
     private let env: AppEnvironment
     let communityId: String
     let onBack: () -> Void
+    let onLeft: () -> Void
+    @State private var invitationCode: String?
+    @State private var invitationCodeError: String?
     @State private var reportingMember: Member?
     @State private var memberPendingBlock: Member?
+    @State private var showsLeaveConfirmation = false
+    @State private var isLeaving = false
+    @State private var leaveError: String?
     @State private var showsDeleteCommunityConfirmation = false
 
-    init(env: AppEnvironment, communityId: String, onBack: @escaping () -> Void) {
+    init(env: AppEnvironment, communityId: String, onBack: @escaping () -> Void, onLeft: @escaping () -> Void) {
         self.env = env
         self.communityId = communityId
         self.onBack = onBack
+        self.onLeft = onLeft
         _languageService = ObservedObject(wrappedValue: env.languageService)
         _vm = StateObject(wrappedValue: CommunityInfoViewModel(repo: env.communityRepository, userRepo: env.userRepository))
     }
@@ -229,6 +237,21 @@ struct CommunityInfoScreen: View {
                         Text(link)
                             .font(.footnote)
                             .textSelection(.enabled)
+                        Text(languageService.phrase("Code d’invitation"))
+                            .font(.caption.weight(.semibold))
+                        if let invitationCode {
+                            Text(invitationCode).font(.title2.monospaced().bold()).textSelection(.enabled)
+                            Button(languageService.phrase("Copier le code")) { UIPasteboard.general.string = invitationCode }
+                                .buttonStyle(.bordered)
+                        } else if let invitationCodeError {
+                            Text(invitationCodeError).font(.caption).foregroundStyle(.red)
+                            Button(languageService.phrase("Réessayer")) { Task { await loadInvitationCode() } }
+                        } else { ProgressView() }
+                        if let url = URL(string: link) {
+                            ShareLink(item: url) {
+                                Label(languageService.phrase("Partager le lien"), systemImage: "square.and.arrow.up")
+                            }.buttonStyle(.borderedProminent)
+                        }
                         Button {
                             UIPasteboard.general.string = link
                         } label: {
@@ -268,9 +291,30 @@ struct CommunityInfoScreen: View {
                 }
             }
 
+            Section {
+                Text(vm.community?.eliminationMode == true ? "Mode éliminatoire activé" : "Mode éliminatoire désactivé").font(.caption)
+                Button("Quitter la communauté", role: .destructive) { showsLeaveConfirmation = true }.disabled(isLeaving)
+                if let leaveError { Text(leaveError).foregroundStyle(.red) }
+            }
+            .alert("Quitter la communauté ?", isPresented: $showsLeaveConfirmation) {
+                Button("Annuler", role: .cancel) {}
+                Button("Quitter", role: .destructive) {
+                    isLeaving = true
+                    Task {
+                        defer { isLeaving = false }
+                        do { try await env.communityRepository.leaveCommunity(communityId: communityId); onLeft() }
+                        catch { leaveError = userErrorMessage(error) }
+                    }
+                }
+            } message: { Text("Si tu es administrateur, l’administration sera transférée à un autre membre.") }
+
+            RankingScheduleSummary(schedule: vm.community?.rankingSchedule ?? RankingSchedule())
             if vm.canModerateMembers {
                 Section(languageService.phrase("Paramètres")) {
                     Toggle(languageService.phrase("Communauté publique"), isOn: $vm.isPublic)
+                    RankingScheduleEditor(schedule: $vm.rankingSchedule)
+                    Toggle("Mode éliminatoire", isOn: $vm.eliminationMode)
+                    Text("Pour les prochaines torpilles : une réponse hors délai entraîne une expulsion. Un retour reste possible.").font(.caption).foregroundStyle(.secondary)
                     ResponseTimePickerCard(hours: $vm.responseHours, minutes: $vm.responseMinutes)
                     Button {
                         vm.saveSettings(communityId: communityId)
@@ -441,6 +485,7 @@ struct CommunityInfoScreen: View {
             onBack()
         }
         .onAppear { vm.start(communityId: communityId) }
+        .task(id: communityId) { await loadInvitationCode() }
         .navigationDestination(isPresented: Binding(
             get: { vm.selectedPublicProfile != nil },
             set: { if !$0 { vm.selectedPublicProfile = nil } }
@@ -534,6 +579,13 @@ struct CommunityInfoScreen: View {
         }
     }
 
+    @MainActor
+    private func loadInvitationCode() async {
+        invitationCodeError = nil
+        do { invitationCode = try await env.communityRepository.invitationCode(communityId: communityId) }
+        catch { invitationCodeError = userErrorMessage(error) }
+    }
+
     private func invitationLink(for communityId: String) -> String {
         let languageCode = languageService.effectiveLanguage.localeIdentifier
         return "https://torpille-38783.web.app/join.html?cid=\(communityId)&lang=\(languageCode)"
@@ -541,6 +593,7 @@ struct CommunityInfoScreen: View {
 }
 
 struct SavedCommunityMessagesScreen: View {
+    @State private var exportItem: SavedContentExport?
     @StateObject private var vm: SavedCommunityMessagesViewModel
     @EnvironmentObject private var languageService: AppLanguageService
     let communityId: String
@@ -581,6 +634,15 @@ struct SavedCommunityMessagesScreen: View {
                         }
                         .buttonStyle(.plain)
 
+                        HStack {
+                            Button { Task { await export(message, save: false) } } label: {
+                                Label("Partager", systemImage: "square.and.arrow.up")
+                            }
+                            Button { Task { await export(message, save: true) } } label: {
+                                Label("Enregistrer sur l’appareil", systemImage: "arrow.down.doc")
+                            }
+                        }.buttonStyle(.borderless).disabled(isLoadingMedia)
+
                         if vm.canPublishToMemories(message) {
                             if vm.isPublishedInMemories(message) {
                                 Button(role: .destructive) {
@@ -620,6 +682,7 @@ struct SavedCommunityMessagesScreen: View {
                 }
             }
         }
+        .sheet(item: $exportItem) { SavedContentExportSheet(item: $0) }
         .navigationTitle(languageService.phrase("Contenus enregistres"))
         .onAppear { vm.start(communityId: communityId) }
         .fullScreenCover(isPresented: $showStoriesViewer) {
@@ -656,6 +719,43 @@ struct SavedCommunityMessagesScreen: View {
             audioPlayer?.pause()
             audioPlayer = nil
         }
+    }
+
+    @MainActor
+    private func export(_ message: Message, save: Bool) async {
+        guard !isLoadingMedia else { return }
+        isLoadingMedia = true
+        vm.error = nil
+        defer { isLoadingMedia = false }
+        do {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TorpilleExports", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            // Retain recent exports so receiving apps can finish reading their copies.
+            for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? [] {
+                if let date = try? old.resourceValues(forKeys: [.creationDateKey]).creationDate,
+                   Date().timeIntervalSince(date) > 86400 { try? FileManager.default.removeItem(at: old) }
+            }
+            let destination: URL
+            if message.type == "text" {
+                destination = folder.appendingPathComponent("Torpille-\(UUID().uuidString).txt")
+                try (message.text ?? "").write(to: destination, atomically: true, encoding: .utf8)
+            } else {
+                let remote = try await vm.resolvePlaybackURL(for: message)
+                guard remote.scheme == "https" else { throw TorpilleError.missingData("Adresse du média invalide.") }
+                let (temporary, response) = try await URLSession.shared.download(from: remote)
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw TorpilleError.missingData("Impossible de télécharger ce contenu. Réessaie.")
+                }
+                let fallback = message.type == "image" ? "jpg" : message.type == "audio" ? "m4a" : "mp4"
+                let ext = response.mimeType.flatMap { mime in
+                    mime.hasPrefix(message.type + "/") ? UTType(mimeType: mime)?.preferredFilenameExtension : nil
+                } ?? fallback
+                destination = folder.appendingPathComponent("Torpille-\(UUID().uuidString).\(ext)")
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            }
+            exportItem = SavedContentExport(url: destination, save: save)
+        } catch { vm.error = userErrorMessage(error) }
     }
 
     private func savedMessageRow(_ message: Message) -> some View {
@@ -745,7 +845,7 @@ struct SavedCommunityMessagesScreen: View {
             playbackTagX = message.tagX
             playbackTagY = message.tagY
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 
@@ -761,7 +861,7 @@ struct SavedCommunityMessagesScreen: View {
             playbackTagX = nil
             playbackTagY = nil
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 
@@ -787,7 +887,7 @@ struct SavedCommunityMessagesScreen: View {
             playingAudioMessageId = message.stableId
             player.play()
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 }
@@ -1095,7 +1195,7 @@ private struct SavedStoryPage: View {
         do {
             resolvedURL = try await vm.resolvePlaybackURL(for: message)
         } catch {
-            loadingError = error.localizedDescription
+            loadingError = userErrorMessage(error)
         }
     }
 
@@ -1117,7 +1217,114 @@ private struct SavedStoryPage: View {
                 activePlayer.play()
                 isAudioPlaying = true
             } catch {
-                loadingError = error.localizedDescription
+                loadingError = userErrorMessage(error)
+            }
+        }
+    }
+}
+
+private struct SavedContentExport: Identifiable {
+    let id = UUID()
+    let url: URL
+    let save: Bool
+}
+private struct SavedContentExportSheet: UIViewControllerRepresentable {
+    let item: SavedContentExport
+    func makeUIViewController(context: Context) -> UIViewController {
+        if item.save { return UIDocumentPickerViewController(forExporting: [item.url], asCopy: true) }
+        let controller = UIActivityViewController(activityItems: [item.url], applicationActivities: nil)
+        return controller
+    }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
+private struct RankingScheduleEditor: View {
+    @Binding var schedule: RankingSchedule
+    private let days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    var body: some View {
+        Toggle("Activer le classement à temps plein", isOn: $schedule.fullTime)
+        if !schedule.fullTime {
+            Picker("Fuseau horaire", selection: $schedule.timeZone) {
+                ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { Text($0).tag($0) }
+            }
+            Text("Le classement et les nouvelles torpilles sont actifs pendant l’un des créneaux ci-dessous. Les créneaux hebdomadaires peuvent traverser minuit.").font(.caption)
+            ForEach(schedule.weekly.indices, id: \.self) { index in
+                VStack(alignment: .leading) {
+                    Picker("Jour", selection: $schedule.weekly[index].day) {
+                        ForEach(1...7, id: \.self) { Text(days[$0 - 1]).tag($0) }
+                    }
+                    DatePicker("Début", selection: minuteBinding(index, start: true), displayedComponents: .hourAndMinute)
+                    DatePicker("Fin", selection: minuteBinding(index, start: false), displayedComponents: .hourAndMinute)
+                    Button("Toute la journée") {
+                        schedule.weekly[index].startMinute = 0
+                        schedule.weekly[index].endMinute = 1440
+                    }.buttonStyle(.borderless)
+                    Button("Supprimer ce créneau", role: .destructive) { schedule.weekly.remove(at: index) }.buttonStyle(.borderless)
+                }.environment(\.timeZone, RankingClockTime.timeZone)
+            }
+            Button("Ajouter un créneau hebdomadaire") { schedule.weekly.append(WeeklyRankingWindow()) }
+                .disabled(schedule.weekly.count >= 28)
+            ForEach(schedule.dates.indices, id: \.self) { index in
+                VStack(alignment: .leading) {
+                    DatePicker("Du", selection: dateBinding(index, start: true))
+                    DatePicker("Au", selection: dateBinding(index, start: false))
+                    Button("Supprimer cette période", role: .destructive) { schedule.dates.remove(at: index) }
+                }.environment(\.timeZone, TimeZone(identifier: schedule.timeZone) ?? .current)
+            }
+            Button("Ajouter une période datée") { schedule.dates.append(DatedRankingWindow()) }
+                .disabled(schedule.dates.count >= 30)
+            Text("Hors horaires : pas de nouvelle torpille ni de points. Les réponses restent possibles et ne relancent aucune obligation. Les pénalités et expulsions attendent la réouverture.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private func minuteBinding(_ index: Int, start: Bool) -> Binding<Date> {
+        Binding(get: {
+            guard schedule.weekly.indices.contains(index) else { return RankingClockTime.date(minutes: 0) }
+            let value = start ? schedule.weekly[index].startMinute : schedule.weekly[index].endMinute
+            return RankingClockTime.date(minutes: value)
+        }, set: {
+            guard schedule.weekly.indices.contains(index) else { return }
+            let value = RankingClockTime.minutes(in: $0)
+            if start { schedule.weekly[index].startMinute = value } else { schedule.weekly[index].endMinute = value }
+        })
+    }
+    private func dateBinding(_ index: Int, start: Bool) -> Binding<Date> {
+        Binding(get: {
+            guard schedule.dates.indices.contains(index) else { return Date() }
+            return Date(timeIntervalSince1970: Double(start ? schedule.dates[index].startMs : schedule.dates[index].endMs) / 1000)
+        }, set: {
+                    guard schedule.dates.indices.contains(index) else { return }
+                    let value = Int64($0.timeIntervalSince1970 * 1000)
+                    if start { schedule.dates[index].startMs = value } else { schedule.dates[index].endMs = value }
+                })
+    }
+}
+
+private struct RankingScheduleSummary: View {
+    let schedule: RankingSchedule
+    private let days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    private func time(_ value: Int) -> String { String(format: "%02d:%02d", value / 60, value % 60) }
+    private func dateLabel(_ milliseconds: Int64) -> String {
+        let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(identifier: schedule.timeZone)
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+    }
+    var body: some View {
+        Section("Horaires du classement") {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Text(schedule.isActive(at: context.date) ? "Classement et torpilles actifs" : "Hors horaires · réponses uniquement")
+            }
+            if schedule.fullTime { Text("Actif à temps plein") }
+            else {
+                Text("Fuseau : \(schedule.timeZone)").font(.caption)
+                ForEach(schedule.weekly.indices, id: \.self) { i in
+                    let w = schedule.weekly[i]
+                    Text("\(days[max(0, min(6, w.day - 1))]) · \(time(w.startMinute)) – \(time(w.endMinute))\(w.endMinute < w.startMinute ? " (lendemain)" : "")")
+                }
+                ForEach(schedule.dates.indices, id: \.self) { i in
+                    Text("\(dateLabel(schedule.dates[i].startMs)) – \(dateLabel(schedule.dates[i].endMs))")
+                }
             }
         }
     }

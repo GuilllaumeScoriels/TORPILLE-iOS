@@ -49,12 +49,41 @@ enum DeviceLegalAcceptance {
     }
 
     static var hasAcceptedCurrentVersion: Bool {
-        hasAcceptedCurrentVersion(in: .standard)
+        hasAcceptedCurrentVersion(for: Auth.auth().currentUser?.uid, in: .standard)
     }
 
     static func hasAcceptedCurrentVersion(in defaults: UserDefaults) -> Bool {
-        defaults.string(forKey: eulaVersionKey) == currentAcceptanceValue
-            && defaults.string(forKey: privacyPolicyVersionKey) == currentAcceptanceValue
+        hasAcceptedCurrentVersion(for: nil, in: defaults)
+    }
+
+    static func hasAcceptedCurrentVersion(for uid: String?, in defaults: UserDefaults = .standard) -> Bool {
+        let suffix = uid.map { ".account.\($0)" } ?? ""
+        return defaults.string(forKey: eulaVersionKey + suffix) == currentAcceptanceValue
+            && defaults.string(forKey: privacyPolicyVersionKey + suffix) == currentAcceptanceValue
+    }
+
+    static func bindToCurrentAccount() {
+        guard let uid = Auth.auth().currentUser?.uid,
+              hasAcceptedCurrentVersion(in: .standard) else { return }
+        recordForAccount(LegalAcceptanceDraft(acceptsEULA: true, acceptsPrivacyPolicy: true), uid: uid)
+    }
+
+    static func migrateExistingSession(uid: String) {
+        let defaults = UserDefaults.standard
+        let key = "legalAccountMigrationCompleted"
+        guard !defaults.bool(forKey: key) else { return }
+        if hasAcceptedCurrentVersion(in: defaults) {
+            recordForAccount(LegalAcceptanceDraft(acceptsEULA: true, acceptsPrivacyPolicy: true), uid: uid)
+        }
+        defaults.set(true, forKey: key)
+    }
+
+    @discardableResult
+    static func recordForAccount(_ acceptance: LegalAcceptanceDraft, uid: String, in defaults: UserDefaults = .standard) -> Bool {
+        guard acceptance.canContinue, !uid.isEmpty else { return false }
+        defaults.set(currentAcceptanceValue, forKey: eulaVersionKey + ".account." + uid)
+        defaults.set(currentAcceptanceValue, forKey: privacyPolicyVersionKey + ".account." + uid)
+        return true
     }
 
     @discardableResult
@@ -67,33 +96,6 @@ enum DeviceLegalAcceptance {
 
 }
 import UniformTypeIdentifiers
-
-private func debugErrorMessage(_ error: Error) -> String {
-    let nsError = error as NSError
-    var extraLines: [String] = []
-
-    if let details = nsError.userInfo[FunctionsErrorDetailsKey] {
-        extraLines.append("details = \(details)")
-    } else if let details = nsError.userInfo["details"] {
-        extraLines.append("details = \(details)")
-    }
-
-    if let failureReason = nsError.userInfo[NSLocalizedFailureReasonErrorKey] {
-        extraLines.append("failureReason = \(failureReason)")
-    }
-
-    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] {
-        extraLines.append("underlying = \(underlyingError)")
-    }
-
-    let extraBlock = extraLines.isEmpty ? "" : "\n" + extraLines.joined(separator: "\n")
-    return """
-    \(nsError.domain) (\(nsError.code))
-    \(nsError.localizedDescription)
-    \(nsError.userInfo)
-    \(extraBlock)
-    """
-}
 
 private func isMissingProfileError(_ error: Error) -> Bool {
     guard let torpilleError = error as? TorpilleError else { return false }
@@ -147,6 +149,7 @@ final class AppRootViewModel: ObservableObject {
 
     init(env: AppEnvironment) {
         self.env = env
+        DeviceLegalAcceptance.migrateExistingSession(uid: env.authRepository.currentUID)
     }
 
     func bootstrap() async {
@@ -159,7 +162,6 @@ final class AppRootViewModel: ObservableObject {
 
         guard DeviceLegalAcceptance.hasAcceptedCurrentVersion else {
             env.notificationCenterService.stop()
-            try? env.authRepository.signOut()
             route = .auth
             return
         }
@@ -218,14 +220,21 @@ final class AppRootViewModel: ObservableObject {
     }
 
     func resumePendingJoinIfPossible() async {
+        do { try await finishAuthentication() }
+        catch { route = .auth }
+    }
+
+    /// The explicit sign-in flow must propagate profile errors to the form.
+    /// Otherwise a successful Firebase login can appear to do nothing.
+    func finishAuthentication() async throws {
         guard DeviceLegalAcceptance.hasAcceptedCurrentVersion,
               !env.authRepository.currentUID.isEmpty,
               env.authRepository.isCurrentUserEmailVerified else {
-            route = .auth
-            return
+            throw TorpilleError.notAuthenticated
         }
         do {
             let me = try await env.userRepository.getMeOrThrow()
+            try Task.checkCancellation()
             if !me.hasRequiredIdentity {
                 route = .profile
             } else if let communityId = pendingJoinCommunityId {
@@ -234,7 +243,9 @@ final class AppRootViewModel: ObservableObject {
                 route = .home
             }
         } catch {
-            route = isMissingProfileError(error) ? .profile : .auth
+            try Task.checkCancellation()
+            if isMissingProfileError(error) { route = .profile }
+            else { throw error }
         }
     }
 
@@ -279,8 +290,9 @@ final class AppRootViewModel: ObservableObject {
         }
 
         if let host = url.host,
-           host.contains("torpille-38783.web.app"),
-           url.path == "/join" {
+           url.scheme == "https",
+           host == "torpille-38783.web.app",
+           ["/join", "/join.html"].contains(url.path) {
             return components?.queryItems?.first(where: { $0.name == "cid" })?.value
         }
 
@@ -290,6 +302,7 @@ final class AppRootViewModel: ObservableObject {
 
 @MainActor
 final class AuthViewModel: ObservableObject {
+    var currentUID: String { authRepository.currentUID }
     @Published var email = ""
     @Published var password = ""
     @Published var passwordConfirmation = ""
@@ -297,21 +310,24 @@ final class AuthViewModel: ObservableObject {
     @Published var error: String?
     @Published var infoMessage: String?
 
-    private let authRepository: AuthRepository
+    private let authRepository: AuthSessionManaging
     private let languageService: AppLanguageService
 
-    init(authRepository: AuthRepository, languageService: AppLanguageService) {
+    private let operationTimeout: TimeInterval
+    private var operationID = 0
+    private var operationTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+
+    init(authRepository: AuthSessionManaging, languageService: AppLanguageService, operationTimeout: TimeInterval = 25) {
         self.authRepository = authRepository
         self.languageService = languageService
+        self.operationTimeout = operationTimeout
     }
 
-    func signIn(hasAcceptedRequiredDocuments: Bool, onSuccess: @escaping () -> Void) {
-        guard hasAcceptedRequiredDocuments && DeviceLegalAcceptance.hasAcceptedCurrentVersion else {
-            error = languageService.phrase("Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.")
-            return
-        }
+    func signIn(hasAcceptedRequiredDocuments: Bool, onSuccess: @escaping () async throws -> Void) {
+        guard !isLoading else { return }
         guard let cleanEmail = validatedEmail() else { return }
-        let cleanPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPassword = password
         guard !cleanPassword.isEmpty else {
             error = "Renseigne ton mot de passe."
             return
@@ -319,8 +335,8 @@ final class AuthViewModel: ObservableObject {
 
         run(onSuccess: onSuccess) {
             try await self.authRepository.signIn(email: cleanEmail, password: cleanPassword)
-            try await self.authRepository.reloadCurrentUser()
-            try await self.authRepository.refreshIDToken()
+            // signIn already returns a fresh user and ID token. Do not gate
+            // access on two redundant authentication network round trips.
             guard self.authRepository.isCurrentUserEmailVerified else {
                 defer { try? self.authRepository.signOut() }
                 self.authRepository.setLanguageCode(self.languageService.firebaseAuthLanguageCode)
@@ -332,18 +348,23 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    func completeSignIn(onSuccess: @escaping () async throws -> Void) {
+        run(onSuccess: onSuccess) { }
+    }
+
     func signUp(hasAcceptedRequiredDocuments: Bool, onSuccess: @escaping () -> Void) {
+        guard !isLoading else { return }
         guard hasAcceptedRequiredDocuments && DeviceLegalAcceptance.hasAcceptedCurrentVersion else {
             error = languageService.phrase("Lis et accepte les règles EULA et la politique de confidentialité avant de continuer.")
             return
         }
         guard let cleanEmail = validatedEmail() else { return }
-        let cleanPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPassword = password
         guard cleanPassword.count >= 6 else {
             error = "Choisis un mot de passe d'au moins 6 caractères."
             return
         }
-        let cleanPasswordConfirmation = passwordConfirmation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPasswordConfirmation = passwordConfirmation
         guard cleanPassword == cleanPasswordConfirmation else {
             error = languageService.text(.authPasswordsMismatch)
             return
@@ -360,14 +381,18 @@ final class AuthViewModel: ObservableObject {
                 // Authenticate first so a different password cannot trigger an email.
                 try await self.authRepository.signIn(email: cleanEmail, password: cleanPassword)
             }
+            DeviceLegalAcceptance.bindToCurrentAccount()
             defer { try? self.authRepository.signOut() }
+            try Task.checkCancellation()
             try await self.authRepository.reloadCurrentUser()
+            try Task.checkCancellation()
             guard !self.authRepository.isCurrentUserEmailVerified else {
                 self.infoMessage = self.languageService.phrase("Ton adresse email est déjà vérifiée. Tu peux te connecter.")
                 return
             }
             self.authRepository.setLanguageCode(self.languageService.firebaseAuthLanguageCode)
             try await self.authRepository.sendEmailVerification()
+            try Task.checkCancellation()
             self.infoMessage = self.languageService.localizedVerificationEmailSent(to: cleanEmail)
         }
     }
@@ -376,18 +401,11 @@ final class AuthViewModel: ObservableObject {
         guard !isLoading else { return }
         guard let cleanEmail = validatedEmail(emptyMessage: languageService.localizedResetPasswordPrompt()) else { return }
 
-        error = nil
-        infoMessage = nil
-        isLoading = true
-        Task {
-            defer { isLoading = false }
-            do {
-                authRepository.setLanguageCode(languageService.firebaseAuthLanguageCode)
-                try await authRepository.sendPasswordReset(email: cleanEmail)
-                infoMessage = languageService.localizedResetPasswordInfo(for: cleanEmail)
-            } catch {
-                self.error = debugErrorMessage(error)
-            }
+        run(onSuccess: {}) {
+            self.authRepository.setLanguageCode(self.languageService.firebaseAuthLanguageCode)
+            try await self.authRepository.sendPasswordReset(email: cleanEmail)
+            try Task.checkCancellation()
+            self.infoMessage = self.languageService.localizedResetPasswordInfo(for: cleanEmail)
         }
     }
 
@@ -418,51 +436,45 @@ final class AuthViewModel: ObservableObject {
         return cleanEmail
     }
 
-    private func run(onSuccess: @escaping () -> Void, _ block: @escaping () async throws -> Void) {
+    private func run(onSuccess: @escaping () async throws -> Void, _ block: @escaping () async throws -> Void) {
         guard !isLoading else { return }
         error = nil
         infoMessage = nil
         isLoading = true
-        Task {
-            defer { isLoading = false }
-            do {
-                try await block()
-                onSuccess()
-            } catch {
-                let nsError = error as NSError
-                let details = String(describing: nsError.userInfo)
-                if details.contains("API_KEY_SERVICE_BLOCKED") || details.contains("identitytoolkit") {
-                    self.error = """
-                    La connexion Firebase est bloquée côté console Google/Firebase.
-                    La clé API iOS n'a pas accès à Identity Toolkit (Email/Mot de passe).
-                    Ouvre Google Cloud Console > APIs & Services > Credentials > clé iOS du projet, puis autorise l'API identitytoolkit.googleapis.com.
-                    """
-                } else {
-                    self.error = self.userFacingAuthError(nsError)
+        operationID += 1
+        let id = operationID
+
+        // Use an independent watchdog: Firebase continuations are not always
+        // cancellation-aware, so a structured task-group timeout could hang too.
+        timeoutTask = Task { [weak self, operationTimeout] in
+            do { try await Task.sleep(nanoseconds: UInt64(max(operationTimeout, 0.001) * 1_000_000_000)) }
+            catch { return }
+            guard let self, self.operationID == id, self.isLoading else { return }
+            self.operationID += 1
+            self.operationTask?.cancel()
+            self.operationTask = nil
+            self.isLoading = false
+            self.error = self.languageService.phrase("La connexion prend trop de temps. Vérifie ta connexion Internet puis réessaie.")
+        }
+        operationTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.operationID == id {
+                    self.timeoutTask?.cancel()
+                    self.timeoutTask = nil
+                    self.operationTask = nil
+                    self.isLoading = false
                 }
             }
-        }
-    }
-
-    private func userFacingAuthError(_ error: NSError) -> String {
-        if error.domain == "FIRAuthErrorDomain" {
-            switch error.code {
-            case 17008:
-                return "Adresse email invalide. Vérifie le format, par exemple nom@example.com."
-            case 17009:
-                return "Mot de passe incorrect."
-            case 17011:
-                return "Aucun compte ne correspond à cet email."
-            case 17010:
-                return languageService.phrase("Trop de tentatives. Patiente quelques instants avant de renvoyer un email.")
-            case 17020:
-                return "Connexion réseau indisponible. Réessaie dans quelques secondes."
-            default:
-                break
+            do {
+                try await block()
+                guard self.operationID == id, !Task.isCancelled else { return }
+                try await onSuccess()
+            } catch {
+                guard self.operationID == id, !Task.isCancelled else { return }
+                self.error = userErrorMessage(error)
             }
         }
-
-        return error.localizedDescription
     }
 }
 
@@ -493,9 +505,8 @@ final class ProfileViewModel: ObservableObject {
     init(repo: UserRepository, authRepository: AuthRepository) {
         self.repo = repo
         self.authRepository = authRepository
-        let defaults = UserDefaults.standard
-        acceptsEULA = defaults.string(forKey: DeviceLegalAcceptance.eulaVersionKey) == DeviceLegalAcceptance.currentAcceptanceValue
-        acceptsPrivacyPolicy = defaults.string(forKey: DeviceLegalAcceptance.privacyPolicyVersionKey) == DeviceLegalAcceptance.currentAcceptanceValue
+        acceptsEULA = DeviceLegalAcceptance.hasAcceptedCurrentVersion
+        acceptsPrivacyPolicy = DeviceLegalAcceptance.hasAcceptedCurrentVersion
     }
 
     func loadExistingProfile() async {
@@ -508,9 +519,8 @@ final class ProfileViewModel: ObservableObject {
         city = profile.city ?? ""
         bio = profile.bio ?? ""
         selectedProfileIcon = profile.profileIcon ?? selectedProfileIcon
-        let defaults = UserDefaults.standard
-        acceptsEULA = defaults.string(forKey: DeviceLegalAcceptance.eulaVersionKey) == DeviceLegalAcceptance.currentAcceptanceValue
-        acceptsPrivacyPolicy = defaults.string(forKey: DeviceLegalAcceptance.privacyPolicyVersionKey) == DeviceLegalAcceptance.currentAcceptanceValue
+        acceptsEULA = DeviceLegalAcceptance.hasAcceptedCurrentVersion
+        acceptsPrivacyPolicy = DeviceLegalAcceptance.hasAcceptedCurrentVersion
     }
 
     var acceptsRequiredDocuments: Bool { acceptsEULA && acceptsPrivacyPolicy && DeviceLegalAcceptance.hasAcceptedCurrentVersion }
@@ -559,9 +569,9 @@ final class ProfileViewModel: ObservableObject {
                     self.error = TorpilleError.pseudoAlreadyUsed.localizedDescription
                 } else if nsError.domain == FirestoreErrorDomain,
                    nsError.code == FirestoreErrorCode.permissionDenied.rawValue {
-                    self.error = "L'enregistrement du profil est refusé par Firestore. Déploie les règles Firestore à jour puis réessaie."
+                    self.error = "Impossible d’enregistrer ton profil pour le moment. Réessaie plus tard."
                 } else {
-                    self.error = debugErrorMessage(error)
+                    self.error = userErrorMessage(error)
                 }
             }
         }
@@ -576,7 +586,7 @@ final class ProfileViewModel: ObservableObject {
             try authRepository.signOut()
             onDone()
         } catch {
-            self.error = debugErrorMessage(error)
+            self.error = userErrorMessage(error)
         }
     }
 
@@ -602,7 +612,7 @@ final class ProfileViewModel: ObservableObject {
                 try? authRepository.signOut()
                 onDone()
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -619,6 +629,7 @@ final class HomeViewModel: ObservableObject {
     @Published var profileSaveMessage: String?
     @Published var profileSaveSucceeded = false
     @Published var isDeletingAccount = false
+    @Published private(set) var isResettingPassword = false
     @Published var blockedUsers: [BlockedUser] = []
     @Published var friends: [PublicFriend] = []
     @Published var friendSearchResults: [UserProfile] = []
@@ -709,7 +720,7 @@ final class HomeViewModel: ObservableObject {
                     }
                 }
             } catch {
-                print("⚠️ HomeViewModel.start non-blocking sync error:", debugErrorMessage(error))
+                print("⚠️ HomeViewModel.start non-blocking sync error:", userErrorMessage(error))
             }
         }
     }
@@ -747,7 +758,7 @@ final class HomeViewModel: ObservableObject {
             if nsError.domain == "UserRepository" && nsError.code == 409 {
                 self.error = "Ce pseudo est déjà utilisé."
             } else {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
             profileSaveMessage = self.error
             profileSaveSucceeded = false
@@ -767,7 +778,7 @@ final class HomeViewModel: ObservableObject {
                 )
                 infoMessage = "Préférences publiques enregistrées."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -784,7 +795,7 @@ final class HomeViewModel: ObservableObject {
             do {
                 friendSearchResults = try await userRepository.searchUsersByPseudo(clean)
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -803,7 +814,7 @@ final class HomeViewModel: ObservableObject {
             infoMessage = "Demande d'ami envoyée à @\(profile.pseudo)."
             return true
         } catch {
-            self.error = debugErrorMessage(error)
+            self.error = userErrorMessage(error)
             return false
         }
     }
@@ -816,7 +827,7 @@ final class HomeViewModel: ObservableObject {
             infoMessage = "@\(friend.pseudo) a été retiré de tes amis."
             return true
         } catch {
-            self.error = debugErrorMessage(error)
+            self.error = userErrorMessage(error)
             return false
         }
     }
@@ -848,6 +859,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func resetPassword() {
+        guard !isResettingPassword else { return }
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanEmail.isEmpty else {
             error = languageService.localizedResetPasswordPrompt()
@@ -856,13 +868,15 @@ final class HomeViewModel: ObservableObject {
 
         error = nil
         infoMessage = nil
+        isResettingPassword = true
         Task {
+            defer { isResettingPassword = false }
             do {
                 authRepository.setLanguageCode(languageService.firebaseAuthLanguageCode)
                 try await authRepository.sendPasswordReset(email: cleanEmail)
                 infoMessage = languageService.localizedResetPasswordInfo(for: cleanEmail)
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -872,7 +886,7 @@ final class HomeViewModel: ObservableObject {
             try authRepository.signOut()
             onDone()
         } catch {
-            self.error = debugErrorMessage(error)
+            self.error = userErrorMessage(error)
         }
     }
 
@@ -897,7 +911,7 @@ final class HomeViewModel: ObservableObject {
                 try? authRepository.signOut()
                 onDone()
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -910,7 +924,7 @@ final class HomeViewModel: ObservableObject {
                 try await communityRepository.unblockUser(blockedUser.id)
                 infoMessage = "@\(blockedUser.pseudo) a été débloqué."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -929,7 +943,7 @@ final class HomeViewModel: ObservableObject {
                     try await userRepository.updatePinnedCommunities(updatedIds)
                     infoMessage = "Communauté retirée de l’accueil."
                 } catch {
-                    self.error = debugErrorMessage(error)
+                    self.error = userErrorMessage(error)
                 }
             }
             return
@@ -945,7 +959,7 @@ final class HomeViewModel: ObservableObject {
                 try await userRepository.updatePinnedCommunities(currentlyPinned + [communityId])
                 infoMessage = "Communauté épinglée dans l’accueil."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1070,7 +1084,7 @@ final class GlobalLeaderboardViewModel: ObservableObject {
                     }
                 }
             } catch {
-                print(debugErrorMessage(error))
+                print(userErrorMessage(error))
             }
         }
     }
@@ -1166,7 +1180,7 @@ final class CreateCommunityViewModel: ObservableObject {
                 } else if isMissingProfileError(error) {
                     self.error = "Ton profil n'existe plus ou n'est pas encore terminé. Ouvre l'écran Profil et complète les informations obligatoires, puis réessaie."
                 } else {
-                    self.error = debugErrorMessage(error)
+                    self.error = userErrorMessage(error)
                 }
             }
         }
@@ -1205,7 +1219,7 @@ final class JoinCommunityViewModel: ObservableObject {
             if isMissingProfileError(error) {
                 self.error = "Ton profil n'existe plus ou n'est pas encore terminé. Ouvre l'écran Profil, enregistre ton pseudo, puis réessaie."
             } else {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1220,6 +1234,8 @@ final class CommunityInfoViewModel: ObservableObject {
     @Published var responseHours = 1
     @Published var responseMinutes = 0
     @Published var isPublic = true
+    @Published var eliminationMode = false
+    @Published var rankingSchedule = RankingSchedule()
     @Published var rawAllowlist = ""
     @Published var error: String?
     @Published var infoMessage: String?
@@ -1254,6 +1270,8 @@ final class CommunityInfoViewModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.community = value
                 self?.isPublic = value?.isPublic ?? true
+                self?.eliminationMode = value?.eliminationMode == true
+                self?.rankingSchedule = value?.rankingSchedule ?? RankingSchedule()
                 let components = splitResponseTime(value?.responseTimeSeconds ?? 3600)
                 self?.responseHours = components.hours
                 self?.responseMinutes = components.minutes
@@ -1305,7 +1323,7 @@ final class CommunityInfoViewModel: ObservableObject {
                     ? "@\(request.requesterPseudo) a rejoint la communauté."
                     : "La demande de @\(request.requesterPseudo) a été refusée."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1319,10 +1337,10 @@ final class CommunityInfoViewModel: ObservableObject {
                 guard response > 0 else {
                     throw TorpilleError.invalidResponseTime
                 }
-                try await repo.updateCommunitySettings(communityId: communityId, isPublic: isPublic, responseTimeSeconds: response)
+                try await repo.updateCommunitySettings(communityId: communityId, isPublic: isPublic, responseTimeSeconds: response, eliminationMode: eliminationMode, rankingSchedule: rankingSchedule)
                 infoMessage = "Parametres enregistres."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1338,7 +1356,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.deleteCommunityPermanently(communityId: communityId)
                 onDeleted()
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1356,7 +1374,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.removeMember(communityId: communityId, memberUid: member.uid)
                 infoMessage = "@\(member.displayName) a ete retire de la communaute."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1369,7 +1387,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.banMember(communityId: communityId, member: member)
                 infoMessage = "@\(member.displayName) a ete banni."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1382,7 +1400,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.hideMemberContent(communityId: communityId, member: member)
                 infoMessage = "Les contenus de @\(member.displayName) sont masqués dans cette communauté."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1395,7 +1413,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.showMemberContent(communityId: communityId, memberUid: member.uid)
                 infoMessage = "Les contenus de @\(member.displayName) sont réaffichés dans cette communauté."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1412,7 +1430,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await repo.blockUser(member)
                 infoMessage = "@\(member.displayName) a été bloqué."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1433,7 +1451,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 )
                 infoMessage = "Signalement envoyé. Une confirmation te sera transmise."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1447,7 +1465,7 @@ final class CommunityInfoViewModel: ObservableObject {
                 try await userRepo.sendFriendRequest(to: profile)
                 infoMessage = "Demande d'ami envoyée à @\(profile.pseudo)."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1582,10 +1600,14 @@ final class CommunityViewModel: ObservableObject {
                     self.refreshUnreadMessages()
                     self.observeMyMemberChanges(communityId: communityId)
                 }
-                try await communityRepo.markCommunityOpened(communityId)
-                try await communityRepo.syncXPState(communityId: communityId)
+                // Background bookkeeping must not replace the conversation with
+                // an error banner when the user has not requested an action.
+                do { try await communityRepo.markCommunityOpened(communityId) }
+                catch { logDiagnostic(error) }
+                do { try await communityRepo.syncXPState(communityId: communityId) }
+                catch { logDiagnostic(error) }
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1648,7 +1670,7 @@ final class CommunityViewModel: ObservableObject {
                 let senderPseudo = try await resolveSenderPseudo()
                 try await communityRepo.sendText(communityId: communityId, senderPseudo: senderPseudo, text: trimmedText)
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1670,7 +1692,7 @@ final class CommunityViewModel: ObservableObject {
                     try await communityRepo.sendCapturedVideoMessage(communityId: communityId, senderPseudo: senderPseudo, localFileURL: fileURL)
                 }
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1704,7 +1726,7 @@ final class CommunityViewModel: ObservableObject {
                     try? FileManager.default.removeItem(at: fileURL)
                 }
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1731,7 +1753,7 @@ final class CommunityViewModel: ObservableObject {
                     durationSeconds: durationSeconds
                 )
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1765,12 +1787,7 @@ final class CommunityViewModel: ObservableObject {
                 )
                 self.publishNextTorpilleToReels = false
             } catch {
-                let nsError = error as NSError
-                self.error = """
-                \(nsError.domain) (\(nsError.code))
-                \(nsError.localizedDescription)
-                \(nsError.userInfo)
-                """
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1801,12 +1818,7 @@ final class CommunityViewModel: ObservableObject {
                 )
                 self.publishResponseToReels = false
             } catch {
-                let nsError = error as NSError
-                self.error = """
-                \(nsError.domain) (\(nsError.code))
-                \(nsError.localizedDescription)
-                \(nsError.userInfo)
-                """
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1820,7 +1832,7 @@ final class CommunityViewModel: ObservableObject {
             do {
                 try await communityRepo.markTorpillesSeen(communityId: communityId, upTo: timestamp)
             } catch {
-                self.error = debugErrorMessage(error)
+                logDiagnostic(error)
             }
         }
     }
@@ -1838,7 +1850,32 @@ final class CommunityViewModel: ObservableObject {
             do {
                 try await communityRepo.markMessagesSeen(communityId: communityId, upTo: latestTimestamp)
             } catch {
-                self.error = debugErrorMessage(error)
+                logDiagnostic(error)
+            }
+        }
+    }
+
+    /// Toggles the current user's reaction: same emoji removes it, another one replaces it.
+    func toggleReaction(communityId: String, message: Message, emoji: String) {
+        guard let messageId = message.id, !messageId.isEmpty, message.type != "system" else { return }
+        let uid = [me?.uid, myMember?.uid].compactMap { $0 }.first { !$0.isEmpty }
+        let newValue: String? = message.reaction(of: uid) == emoji ? nil : emoji
+
+        // Optimistic update so the chip reacts instantly; the listener confirms it.
+        if let uid, let index = messages.firstIndex(where: { $0.id == messageId }) {
+            var reactions = messages[index].reactions ?? [:]
+            reactions[uid] = newValue
+            messages[index].reactions = reactions
+        }
+        Task {
+            do {
+                try await communityRepo.setReaction(communityId: communityId, messageId: messageId, emoji: newValue)
+            } catch {
+                // Roll back to what the server has.
+                if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+                    self.messages[index].reactions = message.reactions
+                }
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1865,7 +1902,7 @@ final class CommunityViewModel: ObservableObject {
                 )
                 infoMessage = "Contenu enregistre dans la discussion."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1886,7 +1923,7 @@ final class CommunityViewModel: ObservableObject {
                 )
                 infoMessage = "Signalement envoyé. Notre équipe vérifie la situation."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1900,7 +1937,7 @@ final class CommunityViewModel: ObservableObject {
                 try await communityRepo.hideMemberContent(communityId: communityId, member: member)
                 infoMessage = "Les contenus de @\(member.displayName) sont masqués dans cette communauté."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -1914,7 +1951,7 @@ final class CommunityViewModel: ObservableObject {
                 try await communityRepo.blockUser(member)
                 infoMessage = "@\(member.displayName) a été bloqué."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2036,7 +2073,7 @@ final class SavedCommunityMessagesViewModel: ObservableObject {
                 try await repo.publishSavedTorpilleToReels(communityId: communityId, message: message)
                 infoMessage = "La torpille a ete publiee dans Memories."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2049,7 +2086,7 @@ final class SavedCommunityMessagesViewModel: ObservableObject {
                 try await repo.unpublishSavedTorpilleFromReels(communityId: communityId, message: message)
                 infoMessage = "La torpille a ete retiree des Memories."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2131,7 +2168,7 @@ final class ReelsViewModel: ObservableObject {
                 try await repo.unpublishReel(reel)
                 infoMessage = "La torpille a ete retiree des Memories."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2160,7 +2197,7 @@ final class ReelsViewModel: ObservableObject {
                 )
                 infoMessage = "Signalement envoyé. Notre équipe vérifie ce contenu."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2180,7 +2217,7 @@ final class ReelsViewModel: ObservableObject {
                 try await repo.blockUser(member)
                 infoMessage = "@\(reel.authorPseudo) a été bloqué. Ses contenus sont désormais masqués."
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2255,8 +2292,8 @@ final class MapViewModel: ObservableObject {
     private var sharedCommunityRegistrations: [String: ListenerRegistration] = [:]
     private var memberUIDsByCommunity: [String: Set<String>] = [:]
     private var membersByCommunity: [String: [Member]] = [:]
-    private var didRequestLocationAfterCommunitiesLoaded = false
-    private var hasLoadedGhostModeFromServer = false
+    @Published private(set) var locationDisplayDate = Date()
+    private var checkInDate: Date?
 
     init(repo: CommunityRepository, userRepository: UserRepository, locationService: LocationService, languageService: AppLanguageService) {
         self.repo = repo
@@ -2275,25 +2312,7 @@ final class MapViewModel: ObservableObject {
         removeSharedCommunityListeners()
         memberUIDsByCommunity = [:]
         membersByCommunity = [:]
-        didRequestLocationAfterCommunitiesLoaded = false
-        hasLoadedGhostModeFromServer = false
-
-        Task {
-            if let profile = try? await userRepository.getMeOrThrow() {
-                isGhostMode = profile.isGhostMode
-                UserDefaults.standard.set(profile.isGhostMode, forKey: Self.ghostModeStorageKey(for: currentUserId))
-                if profile.isGhostMode {
-                    myLocationAnnotation = nil
-                    hasPublishedMyLocation = false
-                }
-            }
-            hasLoadedGhostModeFromServer = true
-            if !isGhostMode, !communities.isEmpty, !didRequestLocationAfterCommunitiesLoaded {
-                didRequestLocationAfterCommunitiesLoaded = true
-                refreshLocation()
-            }
-        }
-
+        // Opening the map never requests or publishes a location.
         communitiesRegistration = repo.observeCommunitiesForMe { [weak self] values in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2310,13 +2329,7 @@ final class MapViewModel: ObservableObject {
                 } else if self.selectedCommunityId.isEmpty {
                     self.members = self.allSharedMembers
                 }
-                if !values.isEmpty
-                    && self.hasLoadedGhostModeFromServer
-                    && !self.didRequestLocationAfterCommunitiesLoaded
-                    && !self.isGhostMode {
-                    self.didRequestLocationAfterCommunitiesLoaded = true
-                    self.refreshLocation()
-                }
+
             }
         }
 
@@ -2332,14 +2345,18 @@ final class MapViewModel: ObservableObject {
         }
     }
 
-    func refreshLocation() {
-        guard !isGhostMode else { return }
+    /// Called only after the user confirms a single manual check-in.
+    func checkIn() {
+        guard !isUpdatingGhostMode else { return }
+        isUpdatingGhostMode = true
         error = nil
         Task {
+            defer { isUpdatingGhostMode = false }
             do {
                 let location = try await locationService.currentLocation()
                 let knownCommunityIds = communities.map(\.stableId).filter { !$0.isEmpty }
                 let communityIds = knownCommunityIds.isEmpty ? (try await repo.myCommunityIds()) : knownCommunityIds
+                try await repo.setGhostMode(false, in: communityIds)
                 let didPublish = try await repo.updateMyLocation(in: communityIds, latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
                 guard didPublish else {
                     self.isGhostMode = true
@@ -2361,19 +2378,25 @@ final class MapViewModel: ObservableObject {
                     profileIcon: profile?.profileIcon,
                     lastTorpilleTimeText: ""
                 )
+                self.isGhostMode = false
+                self.checkInDate = Date()
+                self.locationDisplayDate = Date()
                 self.hasPublishedMyLocation = true
             } catch {
                 self.hasPublishedMyLocation = false
-                self.error = error.localizedDescription
+                self.error = userErrorMessage(error)
             }
         }
     }
 
-    func setGhostMode(_ enabled: Bool) {
-        guard enabled != isGhostMode, !isUpdatingGhostMode else { return }
+    func hideMyLocation() {
+        let enabled = true
+        guard !isUpdatingGhostMode else { return }
         let previousValue = isGhostMode
         isGhostMode = enabled
-        myLocationAnnotation = enabled ? nil : myLocationAnnotation
+        myLocationAnnotation = nil
+        checkInDate = nil
+        hasPublishedMyLocation = false
         UserDefaults.standard.set(enabled, forKey: Self.ghostModeStorageKey(for: currentUserId))
         error = nil
         isUpdatingGhostMode = true
@@ -2383,13 +2406,10 @@ final class MapViewModel: ObservableObject {
             do {
                 let communityIds = communities.map(\.stableId).filter { !$0.isEmpty }
                 try await repo.setGhostMode(enabled, in: communityIds)
-                if !enabled {
-                    refreshLocation()
-                }
             } catch {
                 isGhostMode = previousValue
                 UserDefaults.standard.set(previousValue, forKey: Self.ghostModeStorageKey(for: currentUserId))
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2427,7 +2447,7 @@ final class MapViewModel: ObservableObject {
                     tagY: 0.2
                 )
             } catch {
-                self.error = debugErrorMessage(error)
+                self.error = userErrorMessage(error)
             }
         }
     }
@@ -2459,8 +2479,10 @@ final class MapViewModel: ObservableObject {
     }
 
     var annotations: [MapMemberAnnotation] {
-        guard !isGhostMode else { return [] }
         var values = filteredMembers.compactMap { member -> MapMemberAnnotation? in
+            guard member.uid != currentUserId,
+                  let updatedAt = member.lastLocationUpdatedAt?.dateValue(),
+                  Self.isCheckInVisible(updatedAt, at: locationDisplayDate) else { return nil }
             guard let latitude = member.lastLatitude, let longitude = member.lastLongitude else { return nil }
             return MapMemberAnnotation(
                 id: member.id,
@@ -2476,11 +2498,37 @@ final class MapViewModel: ObservableObject {
                 lastTorpilleTimeText: member.mapLastTorpilleTimeText
             )
         }
-        if let myLocationAnnotation {
+        if let myLocationAnnotation, let checkInDate,
+           Self.isCheckInVisible(checkInDate, at: locationDisplayDate) {
             values.removeAll { $0.id == myLocationAnnotation.id }
             values.append(myLocationAnnotation)
         }
         return values
+    }
+
+    static func isCheckInVisible(_ date: Date, at now: Date) -> Bool {
+        let age = now.timeIntervalSince(date)
+        return age >= 0 && age < 30 * 60
+    }
+
+    func updateLocationDisplayDate(_ date: Date) {
+        locationDisplayDate = date
+        if let checkInDate, !Self.isCheckInVisible(checkInDate, at: date) {
+            hasPublishedMyLocation = false
+            myLocationAnnotation = nil
+        }
+    }
+
+    func blockMapUser(_ annotation: MapMemberAnnotation) {
+        Task {
+            do {
+                try await repo.blockUser(Member(uid: annotation.id, pseudo: annotation.pseudo,
+                                                photoUrl: annotation.photoUrl, profileIcon: annotation.profileIcon))
+                selectedPublicProfile = nil
+            } catch {
+                self.error = userErrorMessage(error)
+            }
+        }
     }
 
     private static func ghostModeStorageKey(for uid: String) -> String {
@@ -2650,7 +2698,7 @@ final class LaunchLocationSyncViewModel: ObservableObject {
             try await repo.markMeActive(in: communityIds)
             lastPresenceSyncAt = Date()
         } catch {
-            lastError = error.localizedDescription
+            lastError = userErrorMessage(error)
             return
         }
 
@@ -2658,4 +2706,26 @@ final class LaunchLocationSyncViewModel: ObservableObject {
         // explicitly disables ghost mode. Launching the app never causes a
         // protected-resource prompt.
     }
+}
+
+
+@MainActor
+final class HomeAnnouncementStore: ObservableObject {
+    @Published private(set) var announcements: [HomeAnnouncement] = []
+    private var registration: ListenerRegistration?
+
+    func start() {
+        guard registration == nil else { return }
+        registration = Firestore.firestore().collection("appAnnouncements")
+            .whereField("published", isEqualTo: true).addSnapshotListener { [weak self] snapshot, error in
+                guard let self else { return }
+                guard error == nil else { self.announcements = []; return }
+                self.announcements = (snapshot?.documents ?? []).compactMap {
+                    HomeAnnouncement(id: $0.documentID, data: $0.data())
+                }.sorted { $0.priority == $1.priority ? $0.id < $1.id : $0.priority > $1.priority }
+            }
+    }
+
+    func stop() { registration?.remove(); registration = nil; announcements = [] }
+    deinit { registration?.remove() }
 }

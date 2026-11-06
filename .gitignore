@@ -54,3 +54,17 @@ outputs/
 # Firebase local configuration
 .firebaserc
 dossier_firebase_déploiement/
+
+# Private store signing material
+release-signing/
+
+# Local configuration and signing files
+GoogleService-Info.plist
+google-services.json
+local.properties
+signing.properties
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision

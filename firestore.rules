@@ -2,6 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Developer-managed home announcements. Console/Admin access uses IAM.
+    match /appAnnouncements/{announcementId} {
+      allow read: if request.auth != null && resource.data.published == true;
+      allow write: if false;
+    }
+
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -332,17 +339,22 @@ service cloud.firestore {
         && request.resource.data.name.size() > 0
         && request.resource.data.isPublic is bool
         && request.resource.data.responseTimeSeconds is number
-        && request.resource.data.responseTimeSeconds > 0;
+        && request.resource.data.responseTimeSeconds > 0
+        && (!("eliminationMode" in request.resource.data) || request.resource.data.eliminationMode is bool);
     }
 
     function isValidCommunityUpdate(communityId) {
-      return request.resource.data.id == communityId
+      // COMPATIBILITY: older clients may rewrite other community fields unchanged or add
+      // their own; only the ranking schedule is reserved to updateCommunitySettings.
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(["rankingSchedule"])
+        && request.resource.data.id == communityId
         && request.resource.data.adminUid == resource.data.adminUid
         && request.resource.data.name == resource.data.name
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.isPublic is bool
         && request.resource.data.responseTimeSeconds is number
-        && request.resource.data.responseTimeSeconds > 0;
+        && request.resource.data.responseTimeSeconds > 0
+        && (!("eliminationMode" in request.resource.data) || request.resource.data.eliminationMode is bool);
     }
 
     function isValidCommunityAdminTransfer(communityId) {
@@ -429,6 +441,22 @@ service cloud.firestore {
         );
     }
 
+    // Emoji reactions: a participant may only set or remove their own entry in
+    // `reactions` (uid -> emoji), with one of the emojis offered by the app
+    // (MessageReaction.allowed in Models.swift).
+    function isValidMessageReactionUpdate() {
+      let before = resource.data.get("reactions", {});
+      let after = request.resource.data.get("reactions", {});
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reactions"])
+        && after is map
+        && after.diff(before).affectedKeys().hasOnly([myUid()])
+        && (
+          !(myUid() in after)
+          || after[myUid()] in ["👍", "❤️", "😂", "😮", "😢", "🔥"]
+        );
+    }
+
     function isValidSavedMessageWrite(messageId) {
       return isSignedIn()
         && request.resource.data.senderUid is string
@@ -444,6 +472,7 @@ service cloud.firestore {
 
     function isValidTorpilleCreate(communityId, torpilleId) {
       return isSignedIn()
+        && !get(/databases/$(database)/documents/communities/$(communityId)).data.get("eliminationMode", false)
         && request.resource.data.id == torpilleId
         && request.resource.data.fromUid == myUid()
         && request.resource.data.communityId == communityId
@@ -451,7 +480,7 @@ service cloud.firestore {
         && request.resource.data.toUid is string
         && request.resource.data.toUid.size() > 0
         && request.resource.data.toUid != myUid()
-        && exists(memberPath(communityId, request.resource.data.toUid))
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(request.resource.data.toUid))
         && !exists(/databases/$(database)/documents/users/$(request.resource.data.toUid)/blockedUsers/$(myUid()))
         && !exists(/databases/$(database)/documents/users/$(myUid())/blockedUsers/$(request.resource.data.toUid))
         && isStringOrNull("videoBucket")
@@ -567,7 +596,8 @@ service cloud.firestore {
 
     function isValidPushTokensOnlyUpdate(uid) {
       return request.resource.data.uid == uid
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "uid",
           "fcmToken",
           "fcmTokens",
           "updatedAt"
@@ -613,6 +643,10 @@ service cloud.firestore {
         );
     }
 
+    // Phone visibility and lookup quotas are accessible only through App Check protected functions.
+    match /contactDiscovery/{uid} { allow read, write: if false; }
+    match /contactDiscoveryLimits/{uid} { allow read, write: if false; }
+
     match /users/{uid} {
       allow read: if isVerifiedEmail()
         || (isSignedIn() && myUid() == uid);
@@ -623,9 +657,11 @@ service cloud.firestore {
 
       allow update: if myUid() == uid
         && (
-          (isSignedIn() && isValidUserDocument(uid))
+          // Check push-only writes before the full profile validation, which can
+          // exhaust Firestore's expression budget on existing complete profiles.
+          isValidPushTokensOnlyUpdate(uid)
+          || (isSignedIn() && isValidUserDocument(uid))
           || isValidXPOnlyUserUpdate(uid)
-          || isValidPushTokensOnlyUpdate(uid)
           || isValidCommunityIdsOnlyUpdate(uid)
           || isValidPinnedCommunitiesOnlyUpdate(uid)
           || isValidGhostModeOnlyUpdate(uid)
@@ -830,7 +866,8 @@ service cloud.firestore {
         || (isSignedIn() && isCommunityParticipant(communityId));
 
       allow create: if canUseVerifiedProfile()
-        && request.resource.data.adminUid == myUid();
+        && request.resource.data.adminUid == myUid()
+        && !("rankingSchedule" in request.resource.data);
 
       allow update: if isSignedIn()
         && isCommunityAdmin(communityId)
@@ -872,6 +909,10 @@ service cloud.firestore {
           && !isBannedFromCommunity(communityId)
           && isValidMemberCreate(uid);
 
+        // COMPATIBILITY (Android and iOS < 1.0.6): those clients still clear their own
+        // pending torpille and adjust XP directly, so member fields stay writable exactly
+        // as in the rules deployed before November 2026. Current iOS goes through
+        // createVideoTorpille / applyExpiredTorpillePenalty instead.
         allow update: if canUseVerifiedProfile()
           && (
             myUid() == uid
@@ -892,7 +933,7 @@ service cloud.firestore {
         allow create: if canUseVerifiedProfile() && isValidMessageCreate(communityId, messageId);
         allow update: if canUseVerifiedProfile()
           && isCommunityParticipant(communityId)
-          && isValidMessageSaveUpdate(messageId);
+          && (isValidMessageSaveUpdate(messageId) || isValidMessageReactionUpdate());
         allow delete: if (isSignedIn() && isCommunityAdmin(communityId))
           || (canUseVerifiedProfile()
             && isCommunityParticipant(communityId)
@@ -912,9 +953,16 @@ service cloud.firestore {
         allow read: if (canUseVerifiedProfile() && isCommunityParticipant(communityId))
           || (isSignedIn() && isCommunityAdmin(communityId));
 
-        allow create: if canUseVerifiedProfile() && isValidTorpilleCreate(communityId, torpilleId);
+        // COMPATIBILITY (Android and iOS < 1.0.6): same permissions as the rules deployed
+        // before November 2026 (client-side creation and replies). Current iOS creates and
+        // answers torpilles through createVideoTorpille. Elimination-mode communities stay
+        // server-only (see isValidTorpilleCreate).
+        allow create: if canUseVerifiedProfile()
+          && isCommunityParticipant(communityId)
+          && isValidTorpilleCreate(communityId, torpilleId);
 
-        allow update: if canUseVerifiedProfile();
+        allow update: if canUseVerifiedProfile()
+          && isCommunityParticipant(communityId);
 
         allow delete: if isSignedIn() && isCommunityAdmin(communityId);
       }

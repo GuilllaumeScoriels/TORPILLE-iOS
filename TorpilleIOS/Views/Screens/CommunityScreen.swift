@@ -14,6 +14,7 @@ struct CommunityScreen: View {
 
     @StateObject private var audioRecorder = AudioRecorderService()
 
+    @State private var hadMembership = false
     @State private var text = ""
     @State private var selectedFileURL: URL?
     @State private var selectedLibraryMediaItems: [PhotosPickerItem] = []
@@ -69,6 +70,13 @@ struct CommunityScreen: View {
         VStack(spacing: 0) {
             header
             topTorpilleBar
+            if let schedule = vm.community?.rankingSchedule, !schedule.fullTime {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    if !schedule.isActive(at: context.date) {
+                        Text("Hors horaires · réponses uniquement, sans points ni relance").font(.caption).padding(.horizontal)
+                    }
+                }
+            }
 
             if let pendingFrom = vm.myMember?.pendingFromPseudo, vm.myMember?.pendingTorpilleId != nil {
                 pendingResponseBanner(from: pendingFrom)
@@ -176,6 +184,10 @@ struct CommunityScreen: View {
             bottomComposer
         }
         .simultaneousGesture(hideKeyboardGesture)
+        .onChange(of: vm.myMember?.uid) { _, uid in
+            if uid != nil { hadMembership = true }
+            else if hadMembership { onBack() }
+        }
         .onAppear {
             hasScrolledToBottomOnOpen = false
             hasPerformedInitialUnreadPositioning = false
@@ -259,7 +271,7 @@ struct CommunityScreen: View {
                                     let mediaURLs = try await LibraryMediaLoader.loadFiles(from: mediaItems)
                                     vm.sendCapturedMediaBatch(communityId: communityId, fileURLs: mediaURLs)
                                 } catch {
-                                    vm.error = error.localizedDescription
+                                    vm.error = userErrorMessage(error)
                                 }
                             }
                         }
@@ -270,7 +282,17 @@ struct CommunityScreen: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showTorpilleCamera) {
+        .sheet(isPresented: $showTorpilleCamera, onDismiss: {
+            // Wait until the camera is dismissed before presenting another sheet.
+            guard let torpilleFileURL else { return }
+            if torpilleCapturePurpose == .response {
+                responseFileURL = torpilleFileURL
+                self.torpilleFileURL = nil
+            } else {
+                torpilleRecipientQuery = ""
+                showTorpilleRecipientSheet = true
+            }
+        }) {
             CameraMediaPicker(selectedFileURL: $torpilleFileURL, allowedTypes: .videoOnly)
         }
         .sheet(item: $reportingMessage) { message in
@@ -310,45 +332,35 @@ struct CommunityScreen: View {
                 SharedPublicUserProfileView(profile: profile)
             }
         }
-        .sheet(item: Binding(get: {
-            playbackURL.map {
-                PlaybackContainer(
-                    url: $0,
+        // The presentation belongs to the playback session, not to an individual
+        // URL. Replacing a sheet item would run onDismiss between torpilles and
+        // clear the queue while the next video is already being displayed.
+        .sheet(isPresented: Binding(
+            get: { playbackURL != nil },
+            set: { if !$0 { playbackURL = nil } }
+        ), onDismiss: {
+            finishUnseenTorpillePlaybackIfNeeded()
+        }) {
+            if let playbackURL {
+                VideoPlayerSheet(
+                    url: playbackURL,
                     mediaType: playbackMediaType,
-                    title: playbackTitle,
-                    sender: playbackSender,
+                    overlayText: playbackTitle,
+                    senderText: playbackSender,
                     tagX: playbackTagX,
-                    tagY: playbackTagY
+                    tagY: playbackTagY,
+                    allowsHoldToPause: unseenPlaybackIndex != nil,
+                    onTap: unseenPlaybackIndex == nil ? nil : { _ in
+                        advanceUnseenTorpillePlayback()
+                    },
+                    onEnded: unseenPlaybackIndex == nil ? nil : {
+                        advanceUnseenTorpillePlayback()
+                    },
+                    onDismissRequest: unseenPlaybackIndex == nil ? nil : {
+                        finishUnseenTorpillePlaybackIfNeeded()
+                    }
                 )
             }
-        }, set: { newValue in
-            playbackURL = newValue?.url
-            playbackMediaType = newValue?.mediaType ?? .video
-            playbackTitle = newValue?.title
-            playbackSender = newValue?.sender
-            playbackTagX = newValue?.tagX
-            playbackTagY = newValue?.tagY
-        }), onDismiss: {
-            finishUnseenTorpillePlaybackIfNeeded()
-        }) { item in
-            VideoPlayerSheet(
-                url: item.url,
-                mediaType: item.mediaType,
-                overlayText: item.title,
-                senderText: item.sender,
-                tagX: item.tagX,
-                tagY: item.tagY,
-                allowsHoldToPause: unseenPlaybackIndex != nil,
-                onTap: unseenPlaybackIndex == nil ? nil : { _ in
-                    advanceUnseenTorpillePlayback()
-                },
-                onEnded: unseenPlaybackIndex == nil ? nil : {
-                    advanceUnseenTorpillePlayback()
-                },
-                onDismissRequest: unseenPlaybackIndex == nil ? nil : {
-                    finishUnseenTorpillePlaybackIfNeeded()
-                }
-            )
         }
         .sheet(isPresented: $showTorpilleRecipientSheet, onDismiss: {
             if torpilleCapturePurpose == .newTorpille, vm.isSending == false, torpilleFileURL != nil {
@@ -410,16 +422,6 @@ struct CommunityScreen: View {
                     showCommunityVideoCamera = false
                 }
                 pendingCommunityVideoURL = newValue
-            }
-        }
-        .onChange(of: torpilleFileURL) { _, newValue in
-            guard let newValue else { return }
-            if torpilleCapturePurpose == .response {
-                responseFileURL = newValue
-                torpilleFileURL = nil
-            } else {
-                torpilleRecipientQuery = ""
-                showTorpilleRecipientSheet = true
             }
         }
         .overlay {
@@ -625,6 +627,10 @@ struct CommunityScreen: View {
             .buttonStyle(.plain)
 
             Button {
+                guard vm.community?.rankingSchedule?.isActive() != false else {
+                    vm.error = "Hors horaires : tu peux seulement répondre à une torpille reçue."
+                    return
+                }
                 torpilleCapturePurpose = .newTorpille
                 showTorpilleCamera = true
             } label: {
@@ -696,15 +702,21 @@ struct CommunityScreen: View {
 
     @ViewBuilder
     private func messageRow(_ message: Message) -> some View {
+        if message.type == "system" {
+            Text(message.text ?? "").font(.caption).foregroundStyle(.gray)
+                .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 3)
+        } else {
         compactMessageRowContent(message)
             .contentShape(Rectangle())
             .onTapGesture {
                 actionForMessage(message)?()
             }
             .contextMenu {
+                reactionMenuItems(for: message)
                 saveMenuItem(for: message)
                 safetyMenuItems(for: message)
             }
+        }
     }
 
     private func compactMessageRowContent(_ message: Message) -> some View {
@@ -746,6 +758,8 @@ struct CommunityScreen: View {
                             .foregroundColor(Color(red: 0.45, green: 0.72, blue: 1.0))
                             .fixedSize(horizontal: false, vertical: true)
                     }
+
+                    reactionChips(for: message)
                 }
 
                 Spacer(minLength: 0)
@@ -777,6 +791,69 @@ struct CommunityScreen: View {
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(isUnread(message) ? 0.82 : 1)
+    }
+
+    /// Tapback-style row of emojis at the top of the long-press menu.
+    @ViewBuilder
+    private func reactionMenuItems(for message: Message) -> some View {
+        let myReaction = message.reaction(of: vm.me?.uid)
+        ControlGroup {
+            ForEach(MessageReaction.allowed, id: \.self) { emoji in
+                Button {
+                    vm.toggleReaction(communityId: communityId, message: message, emoji: emoji)
+                } label: {
+                    Text(emoji)
+                }
+                .accessibilityLabel(emoji)
+            }
+        }
+        .controlGroupStyle(.palette)
+        if myReaction != nil {
+            Button {
+                if let myReaction {
+                    vm.toggleReaction(communityId: communityId, message: message, emoji: myReaction)
+                }
+            } label: {
+                Label(languageService.phrase("Retirer ma réaction"), systemImage: "face.dashed")
+            }
+        }
+        Divider()
+    }
+
+    /// Reaction counters under the message; tapping one adds/removes my reaction.
+    @ViewBuilder
+    private func reactionChips(for message: Message) -> some View {
+        let summary = message.reactionSummary
+        if !summary.isEmpty {
+            let myReaction = message.reaction(of: vm.me?.uid)
+            HStack(spacing: 4) {
+                ForEach(summary, id: \.emoji) { item in
+                    let isMine = item.emoji == myReaction
+                    Button {
+                        vm.toggleReaction(communityId: communityId, message: message, emoji: item.emoji)
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(item.emoji).font(.caption)
+                            Text("\(item.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(isMine ? Color.accentColor : .secondary)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(isMine ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemBackground))
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(isMine ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.2), lineWidth: 0.8)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(item.emoji) \(item.count)")
+                    .accessibilityAddTraits(isMine ? .isSelected : [])
+                }
+            }
+            .padding(.top, 3)
+        }
     }
 
     @ViewBuilder
@@ -1168,7 +1245,7 @@ struct CommunityScreen: View {
                     try await audioRecorder.startRecording()
                 }
             } catch {
-                vm.error = error.localizedDescription
+                vm.error = userErrorMessage(error)
             }
         }
     }
@@ -1193,7 +1270,7 @@ struct CommunityScreen: View {
             playbackTagX = message.tagX
             playbackTagY = message.tagY
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 
@@ -1212,7 +1289,7 @@ struct CommunityScreen: View {
             return true
         } catch {
             if reportError {
-                vm.error = error.localizedDescription
+                vm.error = userErrorMessage(error)
             }
             return false
         }
@@ -1237,6 +1314,8 @@ struct CommunityScreen: View {
             return
         }
 
+        // Block duplicate tap/end events while the next video is loading.
+        isLoadingMedia = true
         unseenPlaybackIndex = index
         unseenPlaybackGeneration += 1
         let generation = unseenPlaybackGeneration
@@ -1280,7 +1359,7 @@ struct CommunityScreen: View {
 
     @MainActor
     private func advanceUnseenTorpillePlayback() {
-        guard let currentIndex = unseenPlaybackIndex else { return }
+        guard !isLoadingMedia, let currentIndex = unseenPlaybackIndex else { return }
         markUnseenTorpilleSeen(at: currentIndex)
         scheduleUnseenTorpillePlayback(at: currentIndex + 1)
     }
@@ -1327,7 +1406,7 @@ struct CommunityScreen: View {
             playbackTagX = nil
             playbackTagY = nil
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 
@@ -1353,7 +1432,7 @@ struct CommunityScreen: View {
             playingAudioMessageId = message.stableId
             player.play()
         } catch {
-            vm.error = error.localizedDescription
+            vm.error = userErrorMessage(error)
         }
     }
 }
