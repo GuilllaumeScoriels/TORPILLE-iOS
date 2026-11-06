@@ -1,95 +1,51 @@
-# Torpille iOS — mise à jour basée sur la version Android améliorée
+# TORPILLE · iOS
 
-Cette archive contient une version iOS SwiftUI mise à jour du projet Torpille en se basant sur le ZIP Android fourni.
+Application sociale native en **Swift et SwiftUI** : communautés, messagerie multimédia et géolocalisation.
 
-## Ce qui a été repris depuis l'Android amélioré
+[Version Android](https://github.com/GuilllaumeScoriels/APK_TORPILLE) · [Fiche App Store](https://apps.apple.com/fr/app/torpille/id6761060711)
 
-- architecture MVVM + repositories
-- modèles Firestore alignés avec l'app Android
-- écran **Carte des torpilleurs** avec géolocalisation et marqueurs membres
-- messages texte + **messages vidéo avec bouton de lecture fonctionnel**
-- lecture vidéo native iOS via `AVPlayer`
-- overlay de tag (`tagX`, `tagY`, `taggedPseudo`) sur le lecteur
-- envoi de torpille vidéo vers Firebase Storage
-- réponse vidéo à une torpille en attente
-- création / jointure / infos de communauté
-- commentaires explicatifs en haut de chaque fichier Swift
+## Fonctionnalités
 
-## Limite importante
+- Création et participation à des communautés.
+- Messages texte et vidéo, envoi et réponse aux torpilles vidéo.
+- Lecture vidéo native avec AVPlayer et affichage des tags.
+- Carte des membres avec MapKit.
+- Invitations et liens vers l’application via `torpille://`.
 
-Je ne peux pas compiler ni exécuter Xcode dans cet environnement Linux, donc je ne peux pas certifier une exécution réelle sur iPhone depuis ici. En revanche, la structure source a été mise à jour de manière cohérente avec le ZIP Android, les fichiers ont été réorganisés proprement, et le flux iOS couvre bien les deux ajouts demandés : **carte** et **boutons vidéo**.
+## Architecture
 
-## Ouvrir le projet
+Architecture **MVVM avec repositories**, backend Firebase partagé avec Android.
 
-1. Sur Mac, installer **Xcode**.
-2. Installer **XcodeGen** si besoin :
-   - `brew install xcodegen`
-3. Copier le vrai fichier Firebase iOS `GoogleService-Info.plist` dans `TorpilleIOS/Resources/`.
-4. Générer le projet Xcode depuis ce dossier :
-   - `xcodegen generate`
-5. Ouvrir `TorpilleIOS.xcodeproj`.
-6. Vérifier le bundle id et l'équipe de signature.
-7. Lancer sur simulateur iPhone ou appareil réel.
+| Dossier | Rôle |
+| --- | --- |
+| `TorpilleIOS/Core/` | Initialisation et utilitaires |
+| `TorpilleIOS/Models/` | Modèles Firestore |
+| `TorpilleIOS/Repositories/` | Firebase, médias, fonctions et localisation |
+| `TorpilleIOS/ViewModels/` | Logique des écrans |
+| `TorpilleIOS/Views/` | Écrans et composants SwiftUI |
+| `TorpilleIOSTests/` | Tests du projet |
+| `functions/` | Cloud Functions |
+| `Hosting/` | Page web d’invitation |
 
-## Vérifications à faire dans Xcode
+**Technologies :** Swift, SwiftUI, Firebase, MapKit, AVKit, PhotosPicker, XcodeGen.
 
-- package Firebase correctement résolu
-- permissions localisation et photothèque présentes dans l'Info.plist
-- accès réseau autorisé pour Firebase Functions / Storage
-- configuration de `videoSignedUrl` et `sendTorpilleNotification`
-- existence des règles Firestore / Storage compatibles avec l'app Android
+## Installation
 
-## Remarques techniques
+1. Cloner le dépôt sur un Mac avec Xcode.
+2. Installer XcodeGen : `brew install xcodegen`.
+3. Ajouter votre configuration Firebase dans `TorpilleIOS/Resources/GoogleService-Info.plist`.
+4. Exécuter `xcodegen generate`.
+5. Ouvrir `TorpilleIOS.xcodeproj` et configurer le bundle identifier et l’équipe de signature.
+6. Résoudre les dépendances et lancer sur simulateur ou iPhone.
 
-- Le flux vidéo iOS utilise **PhotosPicker** pour choisir une vidéo côté utilisateur.
-- La lecture vidéo passe par **AVKit**.
-- La carte utilise **MapKit**.
-- Le schéma d'URL `torpille://` est prévu dans `project.yml`.
+Conserver les configurations locales et fichiers de signature hors du dépôt.
 
-## Fichiers principaux
+## Configuration et validation
 
-- `TorpilleIOS/Core/` : bootstrap + erreurs + helpers
-- `TorpilleIOS/Models/` : modèles Firestore
-- `TorpilleIOS/Repositories/` : Firebase, Storage, Functions, localisation
-- `TorpilleIOS/ViewModels/` : logique d'écran
-- `TorpilleIOS/Views/` : SwiftUI (écrans + composants)
+Configurer Firebase Authentication, Firestore, Storage et les Cloud Functions, notamment `videoSignedUrl` et `sendTorpilleNotification`. Vérifier les autorisations de localisation et de photothèque. Les notifications, invitations, médias et échanges avec Android nécessitent des tests sur appareils configurés.
 
+## Backend et invitations
 
+Les invitations utilisent `https://torpille-38783.web.app/join?cid=<communityId>`. Le backend est partagé avec Android : coordonner tout déploiement des règles et fonctions.
 
-## Correctifs appliqués
-
-- ajout d'un vrai `Info.plist` dans `TorpilleIOS/Resources/`
-- suppression de la dépendance SPM `FirebaseFirestoreSwift` devenue inutile ici
-- conservation de `FirebaseFirestore` pour les APIs de décodage Firestore
-
-
-## Invitation communauté avec Android + iPhone
-
-Le lien d’invitation de communauté reste :
-
-`https://torpille-38783.web.app/join?cid=<communityId>`
-
-J’ai ajouté un mini projet Firebase Hosting dans `Hosting/` avec une page `join.html` qui :
-- récupère `cid` dans l’URL,
-- affiche un bouton **Télécharger sur Android**,
-- affiche un bouton **Télécharger sur iPhone**,
-- garde un bouton **Ouvrir dans l’app Torpille** via `torpille://join?cid=...`.
-
-### Déploiement
-
-Depuis le dossier `Hosting/` :
-
-```bash
-firebase deploy --only hosting
-```
-
-### Liens de téléchargement configurés
-
-- iPhone : https://apps.apple.com/fr/app/torpille/id6761060711 — fiche Torpille vérifiée dans le catalogue Apple pour `com.torpille.ios`.
-- Android : https://torpille-android-38783.web.app/ — page de téléchargement de l’APK de test.
-
-La page d’invitation conserve `cid` et la langue dans le lien Android. La page Android permet de revenir à cette même invitation après l’installation. Les liens d’invitation existants et nouveaux utilisent la même page publiée.
-
-## Version Android et configuration locale
-
-Les sources Android sont disponibles dans [APK_TORPILLE](https://github.com/GuilllaumeScoriels/APK_TORPILLE). Après clonage, ajouter votre propre `TorpilleIOS/Resources/GoogleService-Info.plist` depuis Firebase. Les fichiers de signature et configurations locales sont exclus de la version publiée.
+Voir [FIREBASE_DEPLOYMENT.md](FIREBASE_DEPLOYMENT.md) et [APP_REVIEW_SUBMISSION.md](APP_REVIEW_SUBMISSION.md).
