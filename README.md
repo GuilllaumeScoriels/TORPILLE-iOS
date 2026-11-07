@@ -1,51 +1,51 @@
 # TORPILLE · iOS
 
-Application sociale native en **Swift et SwiftUI** : communautés, messagerie multimédia et géolocalisation.
+A native social application built with **Swift and SwiftUI**, featuring communities, multimedia messaging, and location sharing.
 
-[Version Android](https://github.com/GuilllaumeScoriels/APK_TORPILLE) · [Fiche App Store](https://apps.apple.com/fr/app/torpille/id6761060711)
+[Android version](https://github.com/GuilllaumeScoriels/APK_TORPILLE) · [App Store listing](https://apps.apple.com/fr/app/torpille/id6761060711)
 
-## Fonctionnalités
+## Features
 
-- Création et participation à des communautés.
-- Messages texte et vidéo, envoi et réponse aux torpilles vidéo.
-- Lecture vidéo native avec AVPlayer et affichage des tags.
-- Carte des membres avec MapKit.
-- Invitations et liens vers l’application via `torpille://`.
+- Create and join communities.
+- Send text and video messages, including video torpilles and replies.
+- Play videos natively with AVPlayer and display tags.
+- View community members on a MapKit map.
+- Share invitations and open the app through the `torpille://` URL scheme.
 
 ## Architecture
 
-Architecture **MVVM avec repositories**, backend Firebase partagé avec Android.
+**MVVM architecture with repositories**, backed by Firebase services shared with Android.
 
-| Dossier | Rôle |
+| Directory | Purpose |
 | --- | --- |
-| `TorpilleIOS/Core/` | Initialisation et utilitaires |
-| `TorpilleIOS/Models/` | Modèles Firestore |
-| `TorpilleIOS/Repositories/` | Firebase, médias, fonctions et localisation |
-| `TorpilleIOS/ViewModels/` | Logique des écrans |
-| `TorpilleIOS/Views/` | Écrans et composants SwiftUI |
-| `TorpilleIOSTests/` | Tests du projet |
+| `TorpilleIOS/Core/` | Initialization and utilities |
+| `TorpilleIOS/Models/` | Firestore data models |
+| `TorpilleIOS/Repositories/` | Firebase, media, functions, and location services |
+| `TorpilleIOS/ViewModels/` | Screen logic |
+| `TorpilleIOS/Views/` | SwiftUI screens and components |
+| `TorpilleIOSTests/` | Project tests |
 | `functions/` | Cloud Functions |
-| `Hosting/` | Page web d’invitation |
+| `Hosting/` | Invitation web page |
 
-**Technologies :** Swift, SwiftUI, Firebase, MapKit, AVKit, PhotosPicker, XcodeGen.
+**Technologies:** Swift, SwiftUI, Firebase, MapKit, AVKit, PhotosPicker, XcodeGen.
 
-## Installation
+## Getting started
 
-1. Cloner le dépôt sur un Mac avec Xcode.
-2. Installer XcodeGen : `brew install xcodegen`.
-3. Ajouter votre configuration Firebase dans `TorpilleIOS/Resources/GoogleService-Info.plist`.
-4. Exécuter `xcodegen generate`.
-5. Ouvrir `TorpilleIOS.xcodeproj` et configurer le bundle identifier et l’équipe de signature.
-6. Résoudre les dépendances et lancer sur simulateur ou iPhone.
+1. Clone this repository on a Mac with Xcode installed.
+2. Install XcodeGen: `brew install xcodegen`.
+3. Add your Firebase configuration to `TorpilleIOS/Resources/GoogleService-Info.plist`.
+4. Run `xcodegen generate`.
+5. Open `TorpilleIOS.xcodeproj` and configure the bundle identifier and signing team.
+6. Resolve dependencies and run the app on a simulator or iPhone.
 
-Conserver les configurations locales et fichiers de signature hors du dépôt.
+Keep local configuration and signing files out of version control.
 
-## Configuration et validation
+## Configuration and validation
 
-Configurer Firebase Authentication, Firestore, Storage et les Cloud Functions, notamment `videoSignedUrl` et `sendTorpilleNotification`. Vérifier les autorisations de localisation et de photothèque. Les notifications, invitations, médias et échanges avec Android nécessitent des tests sur appareils configurés.
+Configure Firebase Authentication, Firestore, Storage, and Cloud Functions, including `videoSignedUrl` and `sendTorpilleNotification`. Check location and photo library permissions. Notifications, invitations, media, and Android interoperability require testing on configured devices.
 
-## Backend et invitations
+## Shared backend and invitations
 
-Les invitations utilisent `https://torpille-38783.web.app/join?cid=<communityId>`. Le backend est partagé avec Android : coordonner tout déploiement des règles et fonctions.
+Invitations use `https://torpille-38783.web.app/join?cid=<communityId>`. The backend is shared with Android: coordinate all rule and function deployments across both platforms.
 
-Voir [FIREBASE_DEPLOYMENT.md](FIREBASE_DEPLOYMENT.md) et [APP_REVIEW_SUBMISSION.md](APP_REVIEW_SUBMISSION.md).
+See [FIREBASE_DEPLOYMENT.md](FIREBASE_DEPLOYMENT.md) and [APP_REVIEW_SUBMISSION.md](APP_REVIEW_SUBMISSION.md).
